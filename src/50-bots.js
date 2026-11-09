@@ -92,7 +92,8 @@ const Bots = (() => {
   const scaryBoard = (prev, board, over) => board.slice(prev.length).some((c) => Cards.rank(c) > over)
     || (suitMax(board) >= 3 && suitMax(board) > suitMax(prev)) || (runMax(board) >= 3 && runMax(board) > runMax(prev));
 
-  // → { cls, made, cat, fd, sOuts (ranks completing a straight), outs, pair, pairRank, aceHigh, over (two overcards) }
+  // → { cls, made, cat, fd, sOuts (ranks completing a straight), outs, pair, pairRank, topPair (top pair or overpair),
+  //     aceHigh, over (two overcards) }
   function analyze(hole, board) {
     const s = HandEval.score(hole.concat(board)), cat = s >> 20;
     const [h1, h2] = hole.map(Cards.rank);
@@ -125,7 +126,7 @@ const Bots = (() => {
     }
     const outs = (fd ? 9 : 0) + 4 * sOuts - (fd ? sOuts : 0);
     const cls = made === 'strong' || made === 'medium' ? made : board.length < 5 && (fd || sOuts >= 2) ? 'draw' : 'bluff';
-    return { cls, made, cat, fd, sOuts, outs, pair: made !== 'none', pairRank,
+    return { cls, made, cat, fd, sOuts, outs, pair: made !== 'none', pairRank, topPair: pairRank > 0 && pairRank >= br[0],
       aceHigh: made === 'none' && (h1 === 14 || h2 === 14), over: made === 'none' && Math.min(h1, h2) > br[0] };
   }
 
@@ -154,13 +155,14 @@ const Bots = (() => {
   const potBet = (L, frac) => to(L.myBet + L.toCall + frac * (L.pot + L.toCall));
   const rnd = (a, b) => a + U.rng() * (b - a);
 
-  // Intent → legal engine action: bets > 100 rounded to 5, never below minTo, no crumbs left behind, no free folds.
+  // Intent → legal engine action: live-like round bets (multiples of 5, of 25 over 1000), never below minTo, no crumbs
+  // left behind, no free folds.
   function legalize(a, L) {
     if (a.type === 'raise') {
       if (!L.canRaise) return L.toCall > 0 ? CALL : CHECK;
-      let t = Math.round(a.to);
-      if (t > 100) t = Math.round(t / 5) * 5;
-      if (t < L.minTo) t = L.minTo > 100 ? Math.ceil(L.minTo / 5) * 5 : L.minTo;
+      const step = Math.max(a.to, L.minTo) > 1000 ? 25 : 5;
+      let t = Math.round(a.to / step) * step;
+      if (t < L.minTo) t = Math.ceil(L.minTo / step) * step;
       if (t >= L.maxTo || L.maxTo - t < 0.3 * (L.pot + 2 * t - L.myBet - L.currentBet)) t = L.maxTo;
       return { type: 'raise', to: t };
     }
@@ -197,7 +199,8 @@ const Bots = (() => {
   const PAIRS = RG('22+');
   // ponytail: per-position "top X% of hands" thresholds (Equity.holeTopPct), calibrated with tools/sim-bots.js on
   // random all-bot lineups; re-run it after changing any number here.
-  const ROCK_OPEN = { UTG: 0.12, 'UTG+1': 0.12, MP: 0.12, LJ: 0.12, HJ: 0.12, CO: 0.13, BTN: 0.16, SB: 0.11 };
+  // The rock opens the ТЗ 6.1 table cut to its top X% (always a subset: "Камень — уже").
+  const ROCK_OPEN = { UTG: 0.08, 'UTG+1': 0.08, MP: 0.08, LJ: 0.08, HJ: 0.12, CO: 0.15, BTN: 0.2, SB: 0.14 };
   const REG_ISO = { 'UTG+1': 0.14, MP: 0.2, LJ: 0.22, HJ: 0.26, CO: 0.33, BTN: 0.4, SB: 0.3 }; // tight early, wide late
   const SPECULATIVE = RG('22+, A2s+, 54s, 65s, 76s, 87s, 98s, T9s, JTs, QJs, KQs'); // over-limp material
   const STATION_LIMP = { UTG: 0.5, 'UTG+1': 0.5, MP: 0.55, LJ: 0.55, HJ: 0.6, CO: 0.65, BTN: 0.7, SB: 0.75 };
@@ -254,7 +257,7 @@ const Bots = (() => {
         // too (raise to isolate), where speculative hands may over-limp in late position — as the coach teaches.
         if (L.canCheck) return (f.limpers <= 1 ? OPEN.BB.has(code) : top <= 0.12) ? to(bb * (3 + f.limpers)) : CHECK;
         const iso = f.limpers && top <= REG_ISO[pos]; // limpers are usually weak: isolate a bit wider than the table
-        if (OPEN[pos].has(code) || (BORDER[pos].has(code) && U.chance(0.5)) || iso) return to(bb * (2.5 + f.limpers));
+        if (OPEN[pos].has(code) || (BORDER[pos].has(code) && U.chance(f.late || pos === 'SB' ? 1 : 0.5)) || iso) return to(bb * (2.5 + f.limpers));
         return f.limpers && (f.late || pos === 'SB') && SPECULATIVE.has(code) ? CALL : FOLD;
       }
       if (nRaises === 1) {
@@ -274,15 +277,16 @@ const Bots = (() => {
       if (f.allin) return ROCK_4B.has(code) ? CALL : commit(f, 0);
       if (nRaises === 0) {
         if (L.canCheck) return top <= 0.05 ? to(bb * (3 + f.limpers)) : CHECK;
-        if (top <= ROCK_OPEN[pos]) return to(bb * (3 + f.limpers));
-        // passive: over-limps hoping to hit, limps small pairs late for a cheap set
-        if (f.limpers && (PAIRS.has(code) || top <= 0.2)) return CALL;
-        return (pos === 'SB' || f.late) && PAIRS.has(code) ? CALL : FOLD;
+        if (OPEN[pos].has(code) && top <= ROCK_OPEN[pos]) return to(bb * (3 + f.limpers));
+        // passive: over-limps hoping to hit, limps pairs for a cheap set
+        if (f.limpers && top <= 0.2) return CALL;
+        return PAIRS.has(code) || ((f.late || pos === 'SB') && top <= 0.22) ? CALL : FOLD;
       }
       if (nRaises === 1) {
         if (PREMIUM.has(code)) return reraise(f, 3);
         if (ROCK_CALL.has(code)) return CALL;
         if (PAIRS.has(code) && f.raiseBB <= 5 && f.eff >= 20 * f.raiseBB) return CALL; // set-mining
+        if (pos === 'BB' && f.raiseBB <= 3 && top <= 0.2) return CALL; // defends the big blind passively
         return FOLD;
       }
       if (!ROCK_4B.has(code)) return FOLD;
@@ -362,7 +366,10 @@ const Bots = (() => {
         return U.chance(0.35) ? potBet(L, 0.5) : CALL;
       }
       if (cls === 'strong') return bf > 1.2 && f.hs < 0.85 && U.chance(0.5) ? FOLD : CALL;
-      if (cls === 'medium') return U.chance((bf <= 0.4 ? 0.6 : bf <= 0.75 ? 0.2 : 0.03) * (f.nOpp > 1 ? 0.6 : 1)) ? CALL : FOLD;
+      if (cls === 'medium') { // a nit, not a fool: top pair / an overpair calls up to half pot; weaker pairs give up
+        if (f.a.topPair && bf <= 0.5) return U.chance(f.nOpp > 1 ? 0.6 : 0.75) ? CALL : FOLD;
+        return U.chance((bf <= 0.4 ? 0.6 : bf <= 0.75 ? 0.2 : 0.03) * (f.nOpp > 1 ? 0.6 : 1)) ? CALL : FOLD;
+      }
       if (cls === 'draw') return bf <= 0.4 && f.eq >= f.odds ? CALL : FOLD;
       return FOLD;
     },
@@ -375,7 +382,9 @@ const Bots = (() => {
       if (f.nuts && L.canRaise && U.chance(0.55)) return potBet(L, f.street === 'flop' ? 0.5 : rnd(1, 1.3)); // monsters: big later
       if (cls !== 'bluff' || a.pair || (a.sOuts === 1 && !f.river)) return CALL;
       if ((a.aceHigh || a.over) && bf <= 0.75) return U.chance(f.river ? 0.5 : 0.9) ? CALL : FOLD;
-      return U.chance({ flop: 0.45, turn: 0.3, river: 0.12 }[f.street]) ? CALL : FOLD;
+      // pure air: sticky on the flop, but big turn/river bets get through (none at all: a river bet of ¾ pot or more)
+      if (f.street === 'flop') return U.chance(0.45) ? CALL : FOLD;
+      return U.chance(f.river ? (bf < 0.75 ? 0.12 * (1 - bf) : 0) : 0.3 * Math.max(0, 1 - bf)) ? CALL : FOLD;
     },
     reg(f) {
       const { L, cls, bf, a, street } = f;
@@ -423,9 +432,11 @@ const Bots = (() => {
     },
   };
 
-  // Timing tells: honest styles tank with monsters and snap-fold junk; the actor does the opposite.
-  function think(style, action, strong) {
+  // Timing tells: honest styles tank with monsters and snap-fold junk; the actor does the opposite. Preflop folds are
+  // trivial for every style: a quick snap keeps the orbit moving.
+  function think(style, action, strong, preflop) {
     const aggressive = action.type === 'raise', easy = action.type === 'fold' || action.type === 'check';
+    if (preflop && action.type === 'fold') return U.randInt(400, 800);
     let ms = U.randInt(700, 1600);
     if (style === 'rock' || style === 'station') {
       if (aggressive && strong) ms += U.randInt(900, 1800);
@@ -439,8 +450,16 @@ const Bots = (() => {
     return Math.round(U.clamp(ms, 400, 3500));
   }
 
+  // Calling all-in for less than the bet: only up to our own total can be won from each player (side pot), so the
+  // decision sees that capped pot, not the shover's whole stack (as Coach does for the hero).
+  function capPot(hand, seat, L) {
+    if (L.toCall >= L.currentBet - L.myBet) return L;
+    const paid = (s) => hand.committed[s] - ((hand.returned && hand.returned[s]) || 0), lim = paid(seat) + L.toCall;
+    return { ...L, pot: hand.seats.reduce((a, s) => a + Math.min(paid(s), lim), 0) };
+  }
+
   function decide({ table, hand, seat, legal, human } = {}) {
-    const L = legal || Engine.legal(hand), p = table.players[seat], st = base(p);
+    const L = capPot(hand, seat, legal || Engine.legal(hand)), p = table.players[seat], st = base(p);
     let intent, strong;
     if (hand.street === 'preflop') {
       const f = preInfo(table, hand, seat, L);
@@ -453,7 +472,7 @@ const Bots = (() => {
       strong = f.cls === 'strong';
     }
     const action = legalize(intent, L);
-    return { action, thinkMs: think(p.style, action, strong) };
+    return { action, thinkMs: think(p.style, action, strong, hand.street === 'preflop') };
   }
 
   // ---------- tells ----------
@@ -508,9 +527,13 @@ const Bots = (() => {
       default: return honest(seat, shown, truth, street, 'subtle');
     }
   }
-  // Noise looks exactly like the style's real tells (so it cannot be filtered out by its wording), for a random truth.
+  // Noise looks exactly like the style's real tells (so it cannot be filtered out by its wording), for a made-up
+  // truth drawn as often as real ones come: only ~1 in 9 street events really makes a hand strong (measured with all-bot
+  // games for every style), so a 50/50 draw would swamp the rare real "strength" tells. This way about 85% of each
+  // signal stays true.
+  const NOISE_STRONG = 0.12;
   const noise = (style, seat, truth, street) =>
-    ({ ...show(style, seat, U.chance(0.5) ? 'strong' : 'weak', street), truth, acting: false, random: true });
+    ({ ...show(style, seat, U.chance(NOISE_STRONG) ? 'strong' : 'weak', street), truth, acting: false, random: true });
 
   // How the new card(s) changed the bot's holding: 'strong' | 'weak' | 'neutral'.
   function streetTruth(hole, prev, board) {

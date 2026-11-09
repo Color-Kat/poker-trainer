@@ -56,7 +56,16 @@ const Coach = (() => {
     // straights, flushes, full houses made with a hole card
     if (cat >= CAT.STRAIGHT && (board.length < 5 || sc > HandEval.score(board))) [strength, label] = ['strong', HandEval.CAT_RU[cat].toLowerCase()];
     else if (board.length === 5 && sc === HandEval.score(board)) [strength, label] = ['none', 'играет борд'];
-    return { cat, name: HandEval.describe(sc), strength, label };
+    const name = HandEval.describe(sc);
+    // How to say it to a beginner: a pair that lives only on the board is shared, not the hero's.
+    let ru = lowerFirst(name);
+    const bp = Math.max(0, ...br.filter((r) => on(r) >= 2 && !hr.includes(r)));
+    if (strength === 'none' && cat > CAT.HIGH && label !== 'играет борд') ru = `только старшая карта — ${Cards.rankRu(Math.max(...hr))} (${ru} на борде общая)`;
+    else if (cat === CAT.TWO_PAIR && bp && ['оверпара', 'топ-пара', 'слабая пара'].includes(label)) {
+      const mine = hr[0] === hr[1] ? hr[0] : hr.find((r) => on(r));
+      ru = `пара ${GP(mine)} (${label}) + пара ${GP(bp)} на борде — общая`;
+    }
+    return { cat, name, strength, label, ru };
   }
 
   // ---------- outs (structural, hero-specific, next card only) ----------
@@ -64,6 +73,8 @@ const Coach = (() => {
     pair: ['спаривает борд, у соперника может быть фулл-хаус', 'спаривают борд, у соперника может быть фулл-хаус'],
     flush: ['даёт стрит, но на борде будет минимум 3 карты одной масти: у соперника может быть флеш', 'дают стрит, но на борде будет минимум 3 карты одной масти: у соперника может быть флеш'],
     nonnut: ['даёт не натсовый флеш: у соперника может быть флеш старше', 'дают не натсовый флеш: у соперника может быть флеш старше'],
+    flush2: ['улучшает руку, но на борде будет минимум 3 карты одной масти: у соперника может быть флеш', 'улучшают руку, но на борде будет минимум 3 карты одной масти: у соперника может быть флеш'],
+    straight2: ['улучшает руку, но на борде будет 4 карты к стриту: у соперника может быть стрит', 'улучшают руку, но на борде будет 4 карты к стриту: у соперника может быть стрит'],
   };
   const NO_OUTS = { total: 0, clean: 0, dirty: 0, over: 0, list: [], cleanList: [], dirtyList: [], overList: [], draws: [] };
   const fourIn = (m, x) => [0, 1, 2, 3].every((i) => m & (1 << (x + i)));
@@ -125,17 +136,29 @@ const Coach = (() => {
         add('boat', ofRank(...paired), (n) => `Две пары: фулл-хаус дают оставшиеся ${NP(paired[0])} и ${NP(paired[1])} (${outsW(n)}).`);
       } else if (paired.length === 1) {
         const r = paired[0], other = hr.find((x) => x !== r);
-        add('trips', ofRank(r), (n) => `Пара ${GP(r)}: тройку дают оставшиеся ${NP(r)} (${outsW(n)}).`);
-        if (!on(other)) add('twopair', ofRank(other), (n) => `Две пары дают оставшиеся ${NP(other)} (${outsW(n)}).`);
+        // on a paired board the "trips" card makes a full house and the "two pair" card only a higher two pair
+        add('trips', ofRank(r), (n, cs) => (HandEval.cat(HandEval.score([...all, cs[0]])) >= CAT.FULL_HOUSE
+          ? `Пара ${GP(r)} при паре на борде: фулл-хаус дают оставшиеся ${NP(r)} (${outsW(n)}).` : `Пара ${GP(r)}: тройку дают оставшиеся ${NP(r)} (${outsW(n)}).`));
+        if (!on(other)) add('twopair', ofRank(other), (n) => `${curCat >= CAT.TWO_PAIR ? 'Две пары старше' : 'Две пары'} дают оставшиеся ${NP(other)} (${outsW(n)}).`);
       }
     }
     const list = [...new Set(draws.flatMap((d) => d.cards))], inList = new Set(list);
     const dirtyCode = (x) => {
-      const cat = HandEval.cat(HandEval.score([...all, x]));
+      const cat = HandEval.cat(HandEval.score([...all, x])), nb = [...board, x];
       if ((cat === CAT.STRAIGHT || cat === CAT.FLUSH) && br.includes(R(x))) return 'pair';
-      if (cat === CAT.STRAIGHT && [0, 1, 2, 3].some((s) => [...board, x].filter((c) => S(c) === s).length >= 3)) return 'flush';
-      const mine = hole.filter((c) => S(c) === S(x));
-      if (cat === CAT.FLUSH && mine.length === 1 && unseen.some((c) => c !== x && S(c) === S(x) && R(c) > R(mine[0]))) return 'nonnut';
+      const flushy = [0, 1, 2, 3].some((s) => nb.filter((c) => S(c) === s).length >= 3);
+      if (cat === CAT.STRAIGHT && flushy) return 'flush';
+      const mine = hole.filter((c) => S(c) === S(x)), topMine = Math.max(0, ...mine.map(R));
+      // counted before the out falls (x included), so every card of the same draw gets the same answer
+      const higher = unseen.filter((c) => (mine.length === 2 || c !== x) && S(c) === S(x) && R(c) > topMine).length;
+      // one suited hole card: any single higher card beats us; two: only a really low flush (7+ higher cards unseen,
+      // e.g. 5♥4♥ on A♥T♥) — a 9-high flush is beaten by few two-card combos. ponytail: fixed threshold, not a combo count
+      if (cat === CAT.FLUSH && (mine.length === 1 ? higher > 0 : higher >= 7)) return 'nonnut';
+      if (cat < CAT.STRAIGHT) { // set / trips / two pair: the same board danger as for straights
+        if (flushy) return 'flush2';
+        const nm = nb.reduce((m, c) => m | (1 << R(c)), 0);
+        if ([...Array(13)].some((_, i) => HandEval.straightTop(nm | (1 << (i + 2))))) return 'straight2';
+      }
       return null;
     };
     const dirtyList = [];
@@ -271,11 +294,16 @@ const Coach = (() => {
       sp.estEq = estimateEq(hole, board, oppSeats.map((s) => ({ base: baseOf(P(s)), frac: s === bettor ? sizeFrac : 0.33 })));
     }
     Object.assign(sp, kind === 'draw' || (kind === 'nodraw' && !river) ? drawVerdicts(sp) : madeVerdicts(sp));
-    sp.questions = kind === 'made' || river ? ['potodds'] : facing ? ['outs', 'cards', 'equity', 'potodds'] : ['outs'];
+    // a made hand with a real draw on top (top pair + flush draw …) still asks the outs questions (SPEC 7)
+    sp.drawToo = kind === 'made' && !river && facing && outs.draws.some((d) => REAL_DRAWS.includes(d.type));
+    sp.questions = (kind === 'made' && !sp.drawToo) || river ? ['potodds'] : facing ? ['outs', 'cards', 'equity', 'potodds'] : ['outs'];
     return sp;
   }
 
   const B = 'best', OK = 'ok', M = 'mistake';
+  const REAL_DRAWS = ['flush', 'oesd', 'double', 'straight'];
+  // Overcards were accepted as outs (small bet, heads-up) and with them the rule pays for the call.
+  const overCall = (sp) => sp.facing && sp.overOk && ruleOf(sp)(sp.correctOuts + sp.outs.over) >= sp.needed && sp.ruleEq < sp.needed;
   function drawVerdicts(sp) {
     const o = sp.correctOuts, fe = sp.foldEq, folds = fe === 'high' || fe === 'medium';
     let best, v;
@@ -291,17 +319,31 @@ const Coach = (() => {
       v = { ...v, call: B, fold: v.fold === M ? M : OK };
       if (best === 'fold') best = 'call';
     }
+    if (overCall(sp) && v.call === M) v = { ...v, call: OK }; // the answers just accepted must not make the call a mistake
     if (!sp.canRaise) delete v.raise;
     return { best, verdicts: v };
   }
   const showdownCall = (sp) => sp.facing && sp.estEq != null && sp.ruleEq < sp.needed && sp.estEq * 100 >= sp.needed;
   // The estimate is a rough range model: within 3 pp of the price (less for tiny prices) call and fold are both acceptable.
-  const isClose = (sp) => Math.abs(sp.estEq * 100 - sp.needed) < Math.min(3, sp.needed / 4);
+  // A Monte Carlo range model is rough: within 5 pp of the price (less for tiny prices) both options are acceptable.
+  const isClose = (sp) => Math.abs(sp.estEq * 100 - sp.needed) < Math.min(5, sp.needed / 4);
+  // Value-raise thresholds scale with the number of opponents: the fair share is 1 / (players in the pot).
+  const raiseBar = (sp) => { const fair = 1 / (sp.nOpp + 1); return { best: Math.min(0.75, 1.6 * fair), ok: Math.min(0.65, 1.3 * fair) }; };
   function madeVerdicts(sp) {
-    const eq = sp.estEq, nutsRaise = sp.bigLate && sp.made.strength !== 'strong', close = isClose(sp);
+    const eq = sp.estEq, m = sp.made, nutsRaise = sp.bigLate && m.strength !== 'strong', close = isClose(sp), bar = raiseBar(sp);
     let res;
-    if (nutsRaise || eq * 100 < sp.needed) res = { best: 'fold', verdicts: { fold: B, call: close && !nutsRaise ? OK : M, raise: M } };
-    else res = { best: 'call', verdicts: { call: B, raise: eq >= 0.75 ? B : eq >= 0.65 ? OK : M, fold: close ? OK : M } };
+    if (m.strength === 'none') {
+      // no pair of your own (the board pair is shared): folding is never a mistake; calling is at most acceptable,
+      // and only when the price is small or the bettor is known to bluff a lot
+      const call = eq * 100 >= sp.needed && (sp.villain.revealed || sp.sizeFrac < 0.5) ? OK : M;
+      res = { best: 'fold', verdicts: { fold: B, call, raise: M } };
+    } else if (nutsRaise || eq * 100 < sp.needed) res = { best: 'fold', verdicts: { fold: B, call: close && !nutsRaise ? OK : M, raise: M } };
+    else {
+      const raise = eq >= bar.best ? B : eq >= bar.ok || m.strength === 'strong' ? OK : M;
+      // a weak pair vs a hidden style: the player cannot know the bettor bluffs a lot, so folding is no blunder
+      const fold = close || (m.strength === 'weak' && !sp.villain.revealed) ? OK : M;
+      res = { best: 'call', verdicts: { call: B, raise, fold } };
+    }
     if (!sp.canRaise) delete res.verdicts.raise;
     return res;
   }
@@ -328,7 +370,9 @@ const Coach = (() => {
 
   // ---------- answer checks ----------
   const fb = (kind, verdict, title, lines) => ({ kind, verdict, title, lines, ok: verdict !== 'mistake' });
-  const num = (v) => (typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')));
+  // strict: '9,5' and '30%' are numbers, '12abc' and '0x10' are not
+  const num = (v) => (typeof v === 'number' ? v : /^\s*-?\d+([.,]\d+)?\s*%?\s*$/.test(String(v)) ? parseFloat(String(v).replace(',', '.')) : NaN);
+  const numRu = (x) => (Math.abs(x) >= 1e6 ? 'больше миллиона' : String(+x.toFixed(2)).replace('.', ',')); // '9,5', never '1e+21'
   const ruleOf = (sp) => (o) => (sp.cardsToSee === 1 ? o * 2 : o * 4 - Math.max(0, o - 8));
   const formula = (sp, o) => (sp.cardsToSee === 1 ? `${o} × 2 = ${o * 2}%` : o > 8 ? `${o} × 4 − (${o} − 8) = ${ruleOf(sp)(o)}%` : `${o} × 4 = ${o * 4}%`);
   const cardsNote = (sp) => (sp.cardsToSee === 2 ? '(две карты: олл-ин на флопе)' : sp.street === 'turn' ? '(одна карта: впереди только ривер)' : '(одна карта, ставка не олл-ин)');
@@ -337,17 +381,25 @@ const Coach = (() => {
   const accOf = (r) => { const n = Cards.rankRu(r); return n.endsWith('а') ? n.slice(0, -1) + 'у' : Cards.rankRu(r, Cards.GEN); };
   function overNote(sp) {
     const ranks = [...new Set(sp.outs.overList.map(R))].sort((a, b) => b - a);
-    const names = cap(joinRu(ranks.map(NP))), pairOf = Cards.rankRu(ranks[0], Cards.GEN);
-    if (!sp.overOk) return `${names} не считаем: ${sp.multiway ? 'соперников несколько' : 'соперник ставил крупно'}, и пары ${pairOf} может не хватить.`;
+    const names = cap(joinRu(ranks.map(NP)));
+    // on a board with trips the "pair" is a full house
+    const boat = HandEval.cat(HandEval.score([...sp.hole, ...sp.board, sp.outs.overList[0]])) >= CAT.FULL_HOUSE;
+    const what = boat ? 'фулл-хауса' : `пары ${Cards.rankRu(ranks[0], Cards.GEN)}`;
+    if (!sp.overOk) {
+      const why = sp.multiway ? 'соперников несколько' : sp.sizeFrac >= 0.66 ? 'соперник ставил крупно' : `ставка соперника немаленькая (${pctR(sp.sizeFrac * 100)} банка)`;
+      return `${names} не считаем: ${why}, и ${what} может не хватить.`;
+    }
     const how = ranks.length > 1 ? `${names} можно посчитать как оверкарты, по 3 аута на каждую` : `${cap(accOf(ranks[0]))} можно посчитать как оверкарту — ещё 3 аута`;
-    return `${how}: ${sp.facing ? 'ставка небольшая' : 'соперник не ставил'}, и пары ${pairOf} может хватить. Тогда ${sp.correctOuts + sp.outs.over} — тоже верно.`;
+    return `${how}: ${sp.facing ? 'ставка небольшая' : 'соперник не ставил'}, и ${what} может хватить. Тогда ${sp.correctOuts + sp.outs.over} — тоже верно.`;
   }
   function outsLines(sp) {
     const o = sp.outs, lines = o.draws.map((d) => d.text);
     if (!o.draws.length) lines.push('Ни одна карта не сделает твою руку сильной: дро нет — 0 аутов.');
     else if (o.draws.length > 1) {
       const sum = U.sum(o.draws.map((d) => d.n)), dup = sum - o.total;
-      lines.push(`Всего: ${o.draws.map((d) => d.n).join(' + ')}${dup ? ` − ${dup} (эти карты посчитаны дважды)` : ''} = ${outsW(o.total)}.`);
+      const twice = o.list.filter((c) => o.draws.filter((d) => d.cards.includes(c)).length > 1).map(Cards.str);
+      const dupTxt = dup ? ` − ${dup} (${twice.join(', ')}: ${dup > 1 ? 'эти карты посчитаны' : 'эта карта посчитана'} дважды)` : '';
+      lines.push(`Всего: ${o.draws.map((d) => d.n).join(' + ')}${dupTxt} = ${outsW(o.total)}.`);
     }
     if (o.over) lines.push(overNote(sp));
     if (o.dirty) {
@@ -375,11 +427,13 @@ const Coach = (() => {
   function check(spot, qid, value, answers = {}) {
     const sp = spot, x = num(value), rule = ruleOf(sp);
     const said = (s) => (Number.isFinite(x) ? `ты указал ${s}` : 'ты ничего не указал');
+    const xs = Number.isFinite(x) ? numRu(x) : '';
     if (qid === 'outs') {
       const hit = sp.acceptedOuts.find((a) => Math.abs(x - a) <= 1);
       const lines = outsLines(sp);
-      if (hit === undefined) return fb('outs', M, `❌ Ауты: ${said(x)}, правильно ${sp.correctOuts}.`, lines);
-      return fb('outs', 'correct', hit === sp.correctOuts ? `✅ Ауты: ${sp.correctOuts} — верно.` : `✅ Ауты: ${x} — засчитано (с оверкартами; без них ${sp.correctOuts}).`, lines);
+      if (hit === undefined) return fb('outs', M, `❌ Ауты: ${said(xs)}, правильно ${sp.correctOuts}.`, lines);
+      const near = x !== hit ? ` (ты указал ${xs}, допуск ±1)` : '';
+      return fb('outs', 'correct', hit === sp.correctOuts ? `✅ Ауты: ${sp.correctOuts} — верно${near}.` : `✅ Ауты: ${hit} — засчитано (с оверкартами; без них ${sp.correctOuts})${near}.`, lines);
     }
     if (qid === 'cards') {
       const w = (k) => (k === 2 ? 'две' : 'одна');
@@ -395,17 +449,22 @@ const Coach = (() => {
         return fb('equity', 'correct', hit === sp.correctOuts ? `✅ Эквити: ${formula(sp, hit)} ${note}.`
           : `✅ Эквити: ${formula(sp, hit)} ${note} — засчитано (с оверкартами).`, hit === sp.correctOuts ? [] : [`Без оверкарт: ${formula(sp, sp.correctOuts)}.`]);
       }
-      const own = num(answers.outs);
-      if (Number.isFinite(own) && Math.abs(x - rule(own)) <= 3) {
-        return fb('equity', 'acceptable', `⚠️ Эквити: метод верный (${formula(sp, own)}), но ауты посчитаны неверно.`, [`Правильно: ${formula(sp, sp.correctOuts)} ${note}.`]);
+      const own = num(answers.outs), ownOk = Number.isFinite(own) && sp.acceptedOuts.some((a) => Math.abs(own - a) <= 1);
+      if (Number.isFinite(own) && Math.abs(x - rule(own)) <= 1) { // the formula was applied right to the player's own count
+        return fb('equity', 'acceptable', ownOk ? `⚠️ Эквити: по твоим ${outsW(own)} формула верна (${formula(sp, own)}), но точно аутов ${sp.correctOuts}.`
+          : `⚠️ Эквити: метод верный (${formula(sp, own)}), но ауты посчитаны неверно.`, [`Правильно: ${formula(sp, sp.correctOuts)} ${note}.`]);
       }
-      return fb('equity', M, `❌ Эквити: ${said(x + '%')}, правильно ${sp.ruleEq}%.`,
+      if (Number.isFinite(own) && sp.cardsToSee === 2 && own > 8 && Math.abs(x - own * 4) <= 1) { // ×4 without the 9+ correction
+        return fb('equity', M, `❌ Эквити: ${said(xs + '%')} — это ${numRu(own)} × 4 без поправки.`,
+          [`При 9+ аутах вычти (ауты − 8): ${formula(sp, own)}. Правильно: ${formula(sp, sp.correctOuts)} ${note}.`]);
+      }
+      return fb('equity', M, `❌ Эквити: ${said(xs + '%')}, правильно ${sp.ruleEq}%.`,
         [`${formula(sp, sp.correctOuts)} ${note}.`, 'Правило 2 и 4: одна карта — ауты × 2, две карты (олл-ин на флопе) — ауты × 4, а при 9+ аутах вычти (ауты − 8).']);
     }
     if (qid === 'potodds') {
       const n = Math.round(sp.needed); // ±2 around the exact value or the rounded one the player is shown
       return Math.min(Math.abs(x - sp.needed), Math.abs(x - n)) <= 2 ? fb('potodds', 'correct', `✅ Шансы банка: ${n}% — верно.`, potLines(sp))
-        : fb('potodds', M, `❌ Шансы банка: ${said(x + '%')}, правильно ${n}%.`, potLines(sp));
+        : fb('potodds', M, `❌ Шансы банка: ${said(xs + '%')}, правильно ${n}%.`, potLines(sp));
     }
     return null;
   }
@@ -415,6 +474,8 @@ const Coach = (() => {
     high: ['сбрасывает часто', 'часто сбрасывает на агрессию'], medium: ['сбрасывает иногда', 'иногда сбрасывает на агрессию'],
     low: ['сбрасывает редко', 'редко сбрасывает на агрессию'], none: ['почти никогда не сбрасывает', 'почти никогда не сбрасывает'],
   };
+  const fem = (name) => /[ая]$/.test(String(name).split(' ')[0]);
+  const him = (sp) => (sp.multiway && !sp.facing && fem(sp.villain.name) ? 'неё' : 'него'); // who() names the player only there
   const who = (sp) => {
     const v = sp.villain, fe = FE_RU[sp.villainFE];
     if (sp.multiway && !sp.facing) return `Самый цепкий из соперников, ${v.name}${v.revealed ? ` («${v.styleName}»), ${fe[0]}` : `, ${fe[1]}`}`; // no bettor to point at
@@ -439,14 +500,21 @@ const Coach = (() => {
           L.push(o < 8 ? `У тебя всего ${outsW(o)} — ставка-полублеф допустима, но проще взять бесплатную карту.`
             : sp.foldEq === 'none' ? `${who(sp)}, так что блефовать бессмысленно. Но у тебя ${outsW(o)}: ставка допустима — такое дро часто выигрывает и само. Бесплатная карта тоже хороша.`
             : `${who(sp)} — ставка-полублеф допустима, но бесплатная карта надёжнее.`);
-        } else if (v.raise === M) L.push(`${who(sp)} — полублеф против него не сработает, бери бесплатную карту.`);
+        } else if (v.raise === M) {
+          L.push(`${who(sp)} — полублеф против ${him(sp)} не сработает. У тебя ${outsW(o)} — около ${E}% попасть на следующей карте: ` +
+            (o < 8 ? 'слишком мало, чтобы ставить без шанса, что соперник сбросит.' : 'без сбросов соперника ставка только раздувает банк, а промахиваешься ты чаще.') + ' Бери бесплатную карту.');
+        }
         if (t === 'fold') L.push('Никогда не сбрасывай, когда можно бесплатно чекнуть.');
         return L;
       }
       if (showdownCall(sp)) {
         L.push(`По аутам ${E}% < ${showNeed(sp)} — как дро колл невыгоден.`);
-        L.push(`Но у тебя уже есть готовая рука (${lowerFirst(sp.made.name)}): против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${pctR(sp.estEq * 100)} эквити — колл окупается.`);
+        L.push(`Но у тебя уже есть готовая рука (${sp.made.ru}): против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${pctR(sp.estEq * 100)} эквити — колл окупается.`);
       } else L.push(`${E}% ${E >= N ? '≥' : '<'} ${showNeed(sp)} — колл ${E >= N ? 'окупается в долгую' : 'в долгую невыгоден'}.`);
+      if (overCall(sp)) {
+        const all = o + sp.outs.over;
+        L.push(`С оверкартами (${outsW(all)}) — ${ruleOf(sp)(all)}% ≥ ${showNeed(sp)}: колл тоже допустим, но пара из оверкарты может и не выиграть, а без них у тебя только ${E}%.`);
+      }
       if (!o && sp.kind === 'nodraw') L.push('У тебя нет ни готовой руки, ни дро — платить не за что.');
       if (o >= 12 && v.raise === B) {
         const eqTo = sp.street === 'flop' ? `около ${o * 4 - (o - 8)}% до ривера` : `около ${o * 2}% на ривере`;
@@ -455,15 +523,15 @@ const Coach = (() => {
         const fe = sp.foldEq;
         if (fe === 'high' || fe === 'medium') L.push(`${who(sp)}, поэтому рейз как полублеф ${E < N ? 'тоже был бы разумным вариантом' : 'тоже допустим'}.`);
         else if (fe === 'low') L.push(`${who(sp)} — рейз-полублеф ${E < N ? 'допустим, но сбросить надёжнее' : 'здесь не лучший вариант'}.`);
-        else L.push(`${who(sp)} — полублеф против него не сработает.`);
+        else L.push(`${who(sp)} — полублеф против ${him(sp)} не сработает.`);
         if (sp.multiway) L.push('Соперников несколько — шанс, что сбросят все, ниже.');
       } else if (t === 'raise' && o < 8) {
         L.push(`Рейз как полублеф имеет смысл только с сильным дро (8+ аутов) против соперника, который умеет сбрасывать${o ? `, а у тебя ${outsW(o)}` : ''}.`);
       }
       return L;
     }
-    const m = sp.made, tag = ['сет', 'трипс', 'оверпара', 'топ-пара', 'слабая пара', 'играет борд'].includes(m.label) ? ` (${m.label})` : '';
-    L.push(`Твоя рука: ${lowerFirst(m.name)}${tag}.`);
+    const m = sp.made, tag = !/общая/.test(m.ru) && ['сет', 'трипс', 'оверпара', 'топ-пара', 'слабая пара', 'играет борд'].includes(m.label) ? ` (${m.label})` : '';
+    L.push(`Твоя рука: ${m.ru}${tag}.`);
     if (sp.bigLate && m.strength !== 'strong') {
       const end = m.strength === 'none' ? 'Твои карты не дали даже пары — сброс.' : 'С одной парой — сброс.';
       L.push(sp.villain.revealed ? `Соперник «${sp.villain.styleName}»: крупный рейз на поздней улице от такого соперника — почти всегда натс. ${end}`
@@ -472,9 +540,22 @@ const Coach = (() => {
     }
     const eq = sp.estEq * 100, ok = eq >= N, close = isClose(sp);
     const p = (x) => (close ? U.pctNum(x, 1) : pctR(x));
-    L.push(`Против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${p(eq)} эквити — нужно ${p(N)}. ` +
-      (close ? `Это почти на грани: ${ok ? 'колл чуть выгоднее, сброс тоже допустим' : 'сброс чуть выгоднее, колл тоже допустим'}.` : ok ? 'Колл окупается.' : 'Колл невыгоден — сбрасывай.'));
+    if (m.strength === 'none') {
+      L.push(`Против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${pctR(eq)} эквити — нужно ${pctR(N)}.`);
+      L.push(v.call === OK ? `Без своей пары колл — это ловля блефа: ${sp.villain.revealed ? `соперник «${sp.villain.styleName}» часто блефует` : 'ставка небольшая'}, поэтому колл допустим, но сброс надёжнее.`
+        : 'Без своей пары колл — это ловля блефа: против крупной ставки сброс надёжнее, ошибкой он не будет никогда.');
+    } else {
+      L.push(`Против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${p(eq)} эквити — нужно ${p(N)}. ` +
+        (close ? `Это почти на грани: ${ok ? 'колл чуть выгоднее, сброс тоже допустим' : 'сброс чуть выгоднее, колл тоже допустим'}.` : ok ? 'Колл окупается.' : 'Колл невыгоден — сбрасывай.'));
+      if (ok && !close && v.fold === OK) L.push('Сброс тоже допустим: со слабой парой против крупной ставки соперника, о котором ты мало знаешь, легко оказаться позади.');
+    }
+    if (sp.drawToo) L.push(`По правилу 2 и 4 одни улучшения (${outsW(o)}) дают ${E}%, но ты и так часто впереди: оценка вместе с готовой рукой — ${pctR(eq)}. Решение принимаем по ней.`);
     if (v.raise === B || v.raise === OK) L.push('Рука сильная — повысить за ценностью тоже хорошо.');
+    else if (t === 'raise' && ok) {
+      const bar = raiseBar(sp), fair = 100 / (sp.nOpp + 1);
+      L.push(`Рейз за ценностью нужен, когда ты заметно впереди: ${sp.multiway ? `против ${U.nplural(sp.nOpp, 'соперника', 'соперников', 'соперников')} честная доля — ${pctR(fair)}, ` : ''}` +
+        `рейз окупается примерно от ${pctR(bar.ok * 100)}, а у тебя ${pctR(eq)}. На рейз заплатят в основном руки сильнее твоей, а слабые сбросят — колл выгоднее.`);
+    } else if (t === 'raise') L.push('Рейз с рукой, которой не хватает даже на колл, только теряет фишки.');
     return L;
   }
 
@@ -501,7 +582,7 @@ const Coach = (() => {
     if (!spot.opps.every((o) => hand.hole[o.seat])) return null;
     const opp = spot.opps.map((o) => hand.hole[o.seat]), hands = [spot.hole, ...opp];
     const real = Equity.calc(hands, spot.board, { toCome: spot.cardsToSee }).eq[0] * 100, rule = spot.ruleEq;
-    const vs = spot.opps.map((o, i) => `${cardsTight(opp[i])} (${o.name})`).join(' и ');
+    const vs = joinRu(spot.opps.map((o, i) => `${cardsTight(opp[i])} (${o.name})`)), many = opp.length > 1;
     const d = real - rule;
     let why;
     const sc = (h, c = []) => HandEval.score([...h, ...spot.board, ...c]);
@@ -513,18 +594,30 @@ const Coach = (() => {
       why = extra.length ? `Реально больше: против этих рук выигрывают и карты, которые не вошли в подсчёт: ${extra.map(Cards.str).join(', ')}.`
         : 'Реально больше: против этих рук выигрывают и карты, которые не вошли в подсчёт аутов.';
     } else {
-      const parts = [];
+      const parts = [], rival = many ? 'соперников' : 'соперника', strs = (cs) => cs.map(Cards.str).join(', ');
       if (spot.cardsToSee === 1) {
         const held = new Set(opp.flat()), mine = spot.multiway ? spot.outs.cleanList : spot.outs.list;
-        const blocked = mine.filter((c) => held.has(c));
-        const lost = mine.filter((c) => !held.has(c) && HandEval.score([...spot.hole, ...spot.board, c]) < Math.max(...opp.map((h) => HandEval.score([...h, ...spot.board, c]))));
-        if (blocked.length) parts.push(`${blocked.map(Cards.str).join(', ')} — у соперника на руках`);
-        if (lost.length) parts.push(`${lost.map(Cards.str).join(', ')} не спасают: у соперника всё равно рука сильнее`);
+        const nowBest = Math.max(...opp.map((h) => sc(h))), bestWith = (c) => Math.max(...opp.map((h) => sc(h, [c])));
+        const blocked = [], ahead = [], split = [], lost = [];
+        for (const c of mine) {
+          if (held.has(c)) { blocked.push(c); continue; }
+          const me = sc(spot.hole, [c]), them = bestWith(c);
+          if (me > them) continue;
+          (me === them ? split : nowBest >= me ? ahead : lost).push(c);
+        }
+        if (blocked.length) parts.push(`${strs(blocked)} — у ${rival} на руках`);
+        if (ahead.length || split.length) {
+          const made = lowerFirst(HandEval.describe(nowBest));
+          parts.push(`у ${many ? 'одного из соперников' : 'соперника'} уже ${made}` +
+            (ahead.length ? ` — с ${strs(ahead)} ты всё равно проигрываешь` : '') + (split.length ? `${ahead.length ? ', а' : ' —'} с ${strs(split)} только делишь банк` : ''));
+        }
+        if (lost.length) parts.push(`${strs(lost)} не ${lost.length > 1 ? 'спасают' : 'спасает'}: с ${lost.length > 1 ? 'ними' : 'ней'} у ${many ? 'кого-то из соперников' : 'соперника'} рука становится сильнее твоей`);
       }
       why = parts.length ? `Реально меньше: часть аутов не работает (${parts.join('; ')}).`
+        : many ? 'Реально меньше: кто-то из соперников уже впереди, и часть твоих аутов не помогает против их рук.'
         : 'Реально меньше: соперник уже впереди, и часть твоих аутов не помогает против его руки.';
     }
-    return { kind: 'realEquity', verdict: 'info', ok: true, title: `ℹ️ По правилу: ${rule}%. Реально против ${vs}: ${U.pctNum(real, 1)}.`, lines: [why] };
+    return { kind: 'realEquity', verdict: 'info', ok: true, title: `ℹ️ ${cap(STREET_RU[spot.street] || 'флоп')}: по правилу ${rule}%. Реально против ${vs}: ${U.pctNum(real, 1)}.`, lines: [why] };
   }
 
   // ---------- reading the opponent (SPEC 9.3) ----------
@@ -539,13 +632,28 @@ const Coach = (() => {
     if (!p || p.isHuman || !hand.hole[e.seat]) return null;
     const sizeFrac = e.potBefore > 0 ? e.add / e.potBefore : 1;
     if (sizeFrac < 0.66) return null;
-    return { bettor: e.seat, truth: classify(hand.hole[e.seat], hand.board), sizeFrac, street: hand.street,
+    const { truth, alt } = readTruth(hand.hole[e.seat], hand.board);
+    return { bettor: e.seat, truth, alt, sizeFrac, street: hand.street,
       board: hand.board.slice(), allIn: !!e.allIn, entry: e.i, options: READ_OPTIONS };
   }
+  // The read is graded in the coach's own vocabulary (madeInfo / computeOuts), not by the bots' betting classes:
+  // set, two pair with hole cards, straight+ = strong; top pair / overpair = medium; any draw = draw; else bluff.
+  // `alt` is the neighbouring answer that is accepted as ⚠️.
+  function readTruth(hole, board) {
+    const m = madeInfo(hole, board);
+    const draw = board.length < 5 && computeOuts(hole, board).draws.some((d) => DRAW_RU[d.type]);
+    if (m.strength === 'strong' || m.strength === 'medium') return { truth: m.strength, alt: m.strength === 'medium' && draw ? 'draw' : null };
+    if (draw) return { truth: 'draw', alt: null };
+    return { truth: 'bluff', alt: m.strength === 'weak' ? 'medium' : null };
+  }
+  const ALT_RU = {
+    bluff: 'Слабая пара против крупной ставки — по сути блеф: так ставят, чтобы выбить руки лучше. «Средняя» — близко.',
+    draw: 'Здесь и готовая пара, и дро — главное всё же пара, но «дро» — близко.',
+  };
 
   function holdingRu(hole, board) {
     const m = madeInfo(hole, board), r = R(hole[0]);
-    let s = m.label === 'сет' ? 'сет ' + GP(r) : m.strength === 'none' && m.cat > CAT.HIGH ? `ничего, ${lowerFirst(m.name)} только на борде` : lowerFirst(m.name);
+    let s = m.label === 'сет' ? 'сет ' + GP(r) : m.strength === 'none' && m.cat > CAT.HIGH ? `ничего, ${lowerFirst(m.name)} только на борде` : m.ru;
     if (board.length < 5) {
       const d = computeOuts(hole, board).draws.find((x) => DRAW_RU[x.type]);
       if (d) s += ' + ' + DRAW_RU[d.type];
@@ -579,28 +687,32 @@ const Coach = (() => {
       return `${p.name} — «${styleName(p)}»${st && st.type ? ` (${st.type})` : ''}.${st && st.desc ? ' Такой игрок ' + lowerFirst(st.desc.split('. ')[0].replace(/\.$/, '')) + '.' : ''}`;
     }
     const h = p.hud || { hands: 0, vpip: 0, pfr: 0 };
-    if (h.hands < 8) return `Статистики у ${gen(p.name)} пока мало (${U.nplural(h.hands, 'раздача', 'раздачи', 'раздач')}) — опирайся на остальные признаки.`;
-    const vpip = h.vpip / h.hands, pfr = h.pfr / h.hands, loose = vpip >= 0.3, aggr = pfr >= vpip * 0.5;
+    if (h.hands < 12) return `Статистики у ${gen(p.name)} пока мало (${U.nplural(h.hands, 'раздача', 'раздачи', 'раздач')}) — опирайся на остальные признаки.`;
+    // absolute PFR bars from the SPEC style table (rock 8, reg 15–18, station 5, maniac 30): a ratio cannot tell a rock from a reg
+    const vpip = h.vpip / h.hands, pfr = h.pfr / h.hands, loose = vpip >= 0.3, aggr = pfr >= (loose ? 0.18 : 0.12);
     const desc = loose ? (aggr ? 'лузовый агрессивный игрок: часто ставит крупно с чем угодно' : 'лузовый пассивный игрок: играет много рук, но крупно ставит в основном с силой')
       : aggr ? 'тайтовый агрессивный игрок: ставит и с сильными руками, и с дро, иногда блефует' : 'тайтовый пассивный игрок: крупно ставит почти только с сильной рукой';
-    return `${p.name} играет ${pctR(vpip * 100)} раздач и повышает префлоп в ${pctR(pfr * 100)} раздач — похоже, это ${desc}.`;
+    return `${p.name} играет ${pctR(vpip * 100)} раздач и повышает префлоп в ${pctR(pfr * 100)} раздач — по первым ${h.hands} раздачам похоже, это ${desc}.`;
   }
 
   function readReview(read, answer, hand, table, extras = {}) {
     if (!read || !hand || !table) return null;
     const p = table.players[read.bettor], hole = hand.hole[read.bettor];
     if (!p || !hole) return null;
-    const ok = answer === read.truth, lab = (READ_OPTIONS.find((o) => o.v === answer) || {}).label;
+    const ok = answer === read.truth, near = !ok && !!read.alt && answer === read.alt, lab = (READ_OPTIONS.find((o) => o.v === answer) || {}).label;
     const lines = ['Признаки:', playerTypeRu(p)];
     const pos = hand.pos[read.bettor];
     if (pos) {
       lines.push(`Позиция: ${pos}${['CO', 'BTN'].includes(pos) ? ' — из поздней позиции чаще ставят широким диапазоном, в том числе блефуют.'
         : ['UTG', 'UTG+1'].includes(pos) ? ' — из ранней позиции обычно играют сильные руки.'
-        : ['MP', 'LJ', 'HJ'].includes(pos) ? ' — из средней позиции играют чуть шире, чем из ранней, но всё ещё довольно сильные руки.' : '.'}`);
+        : ['MP', 'LJ', 'HJ'].includes(pos) ? ' — из средней позиции играют чуть шире, чем из ранней, но всё ещё довольно сильные руки.'
+        : ['SB', 'BB'].includes(pos) ? ' — с блайнда в игру входят очень разными руками, позиция здесь мало что подсказывает.' : '.'}`);
     }
     const pre = preflopRu(hand, read.bettor);
     if (pre) lines.push(pre);
-    lines.push(`Размер ставки: ${pctR(read.sizeFrac * 100)} банка${read.allIn ? ' (олл-ин)' : ''} — крупно: так ставят с очень сильной рукой или с блефом, средние руки обычно ставят меньше.`);
+    const k = read.sizeFrac < 10 ? Math.round(read.sizeFrac * 10) / 10 : Math.round(read.sizeFrac);
+    const size = read.sizeFrac >= 2 ? `в ${U.dec(k, 1)} ${k % 1 ? 'раза' : U.plural(k, 'раз', 'раза', 'раз')} больше банка` : `${pctR(read.sizeFrac * 100)} банка`;
+    lines.push(`Размер ставки: ${size}${read.allIn ? ' (олл-ин)' : ''} — крупно: так ставят с очень сильной рукой или с блефом, средние руки обычно ставят меньше.`);
     const ms = extras.thinkMs;
     if (Number.isFinite(ms)) {
       const s = U.dec(ms / 1000, 1);
@@ -611,9 +723,15 @@ const Coach = (() => {
     if (Array.isArray(extras.tellsSeen)) {
       const seen = extras.tellsSeen.filter((r) => r && r.seat === read.bettor);
       if (!seen.length) lines.push(`Теллов у ${gen(p.name)} ты не видел.`);
-      for (const r of seen) lines.push(`Телл: ${p.name} ${r.text}${r.meaning ? ` — ${r.meaning}` : ''}${r.acting ? ' (на деле это был спектакль: показанное было обратным)' : ''}.`);
+      for (const r of seen) {
+        lines.push(`Телл: ${p.name} ${r.text}${r.meaning ? ` — ${r.meaning}` : ''}${r.acting ? ' (на деле это был спектакль: показанное было обратным)'
+          : r.random ? ' (на деле эта реакция была случайной — теллы надёжны не на 100%)' : ''}.`);
+      }
+      if (seen.length && seen.every((r) => r.random)) lines.push(`Реакции ${gen(p.name)} не совпадали с картами — на теллы этого игрока лучше не опираться.`);
     }
     lines.push(`На самом деле у ${gen(p.name)}: ${cardsTight(hole)} — ${holdingRu(hole, read.board || hand.board)} (${TRUTH_RU[read.truth]}).`);
+    if (near) lines.push(ALT_RU[read.truth]);
+    if (near) return fb('read', 'acceptable', `⚠️ Чтение соперника: «${lab}» — близко, точнее — ${TRUTH_RU[read.truth]}.`, lines);
     const title = ok ? `✅ Чтение соперника: верно — ${TRUTH_RU[read.truth]}.`
       : lab ? `❌ Чтение соперника: ты выбрал «${lab}», а на самом деле — ${TRUTH_RU[read.truth]}.` : `❌ Чтение соперника: на самом деле — ${TRUTH_RU[read.truth]}.`;
     return fb('read', ok ? 'correct' : M, title, lines);
@@ -627,7 +745,7 @@ const Coach = (() => {
     const st = STREET_RU[street] || 'флоп';
     const meaning = String(r.meaning || '').replace(/флоп/g, st);
     return fb('tells', M, `❌ Теллы: ты смотрел на борд, когда открывался ${st}.`,
-      [`Ты смотрел на борд. В этот момент ${table.players[r.seat].name} ${r.text}${meaning ? ` — ${meaning}` : ''}. Смотри на соперников, борд никуда не денется.`]);
+      [`Пока ты смотрел на борд, ты пропустил реакцию: ${table.players[r.seat].name} ${r.text}${meaning ? ` — ${meaning}` : ''}. Смотри на соперников, борд никуда не денется.`]);
   }
 
   // ---------- the player's own timing (SPEC 9.4) ----------

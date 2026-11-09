@@ -60,11 +60,45 @@
     }
     const count = (key) => Ranges.grid(key).flat().reduce((a, c) => ((a[c.cls] = (a[c.cls] || 0) + 1), a), {});
     assert.deepStrictEqual(count('UTG'), { in: 14, border: 4, out: 151 });
-    assert.deepStrictEqual(count('vsRaise'), { raise: 5, call: 19, out: 145 });
-    assert.deepStrictEqual(count('vs3bet'), { raise: 5, out: 164 });
+    // no position / stack: connectors, small pairs and borderline calls are conditional ('border'), as in VS_RAISE_TEXT
+    assert.deepStrictEqual(count('vsRaise'), { raise: 5, call: 8, border: 15, out: 141 });
+    assert.deepStrictEqual(count('vs3bet'), { raise: 5, border: 2, out: 162 });
     assert.strictEqual(Ranges.grid('vsRaise')[2][2].cls, 'raise');  // QQ
     assert.strictEqual(Ranges.grid('vsRaise')[3][3].cls, 'call');   // JJ
     assert.strictEqual(Ranges.grid('BB')[0][12].cls, 'in');         // A2s: BB raises with the CO range
+  });
+
+  test('ranges: the vs-raise grid follows the hero position and stack, like the verdict (SPEC 6.3)', () => {
+    const cell = (key, code, ctx) => Ranges.grid(key, ctx).flat().find((c) => c.code === code).cls;
+    assert.strictEqual(cell('vsRaise:UTG+1', '87s'), 'out');
+    assert.strictEqual(cell('vsRaise:MP', 'QJs'), 'border');
+    assert.strictEqual(cell('vsRaise:BTN', '87s'), 'call');
+    assert.strictEqual(cell('vsRaise', '87s', { pos: 'CO' }), 'call');
+    assert.strictEqual(cell('vsRaise:BTN', '33'), 'border');              // stack unknown
+    assert.strictEqual(cell('vsRaise:BTN', '33', { deep: true }), 'call');
+    assert.strictEqual(cell('vsRaise:BTN', '33', { deep: false }), 'out');
+    assert.strictEqual(cell('vsRaise:UTG', 'AQo'), 'border');
+    assert.strictEqual(cell('vs3bet', 'JJ'), 'border');
+    assert.ok(Ranges.VS_RAISE_TEXT.includes('только на BTN/CO'));
+    // the grid agrees with the verdict for a real spot: UTG+1 calls a raise with 87s
+    const h = at(9, 'UTG+1', '8h 7h', ['raise:50']);
+    assert.strictEqual(verdict(h, 'call'), 'mistake');
+  });
+
+  test('ranges: BB defends against a steal — heads-up KQo call is correct, vs a 9-max BTN it is acceptable', () => {
+    const hu = at(2, 'BB', 'Kd Qc', ['raise:50']);
+    const e = ev(hu, 'call');
+    assert.strictEqual(e.verdict, 'correct');
+    assert.ok(e.lines.some((l) => l.startsWith('Но на BB ты уже вложил блайнд и закрываешь торговлю')), e.lines.join('\n'));
+    assert.strictEqual(verdict(hu, 'fold'), 'acceptable');
+    assert.strictEqual(verdict(at(2, 'BB', '7c 2d', ['raise:50']), 'call'), 'mistake'); // not in the BTN range
+    // 9-max: everybody folds to the BTN, who raises; the BB calls A9o
+    const btn = at(9, 'BB', 'As 9d', ['fold', 'fold', 'fold', 'fold', 'fold', 'fold', 'raise:50', 'fold']);
+    assert.strictEqual(btn.hand.pos[Ranges.situation(btn.hand, 0).raiser], 'BTN');
+    assert.strictEqual(verdict(btn, 'call'), 'acceptable');
+    assert.strictEqual(verdict(btn, 'fold'), 'correct');
+    // an early raise is no steal: still a fold
+    assert.strictEqual(verdict(at(9, 'BB', 'As 9d', ['raise:50']), 'call'), 'mistake');
   });
 
   test('ranges: SPEC 6.3 — UTG at 9 limps K-J offsuit', () => {
@@ -99,7 +133,7 @@
     const sixes = at(9, 'UTG+1', '6s 6d');
     const b = ev(sixes, 'raise');
     assert.strictEqual(b.verdict, 'acceptable');
-    assert.strictEqual(b.title, '⚠️ Префлоп: допустимо.');
+    assert.strictEqual(b.title, '⚠️ Префлоп: рейз — допустимо.');
     assert.ok(b.lines.some((l) => l.includes('рука на границе диапазона')));
     assert.ok(b.lines.some((l) => l.startsWith('Пара шестёрок')));
     assert.strictEqual(verdict(sixes, 'fold'), 'correct');

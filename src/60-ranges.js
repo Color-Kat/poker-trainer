@@ -157,6 +157,14 @@ const Ranges = (() => {
         why.push(CONNECTORS.has(code) ? 'Одномастные коннекторы против рейза коллируют только на BTN/CO — здесь сброс.'
           : `${C} ${enters(false)} в список рук для игры против рейза — сброс.`);
       }
+      // BB against a steal (late position, or any raise at a table of 2–3): the blind is already in and the BB closes
+      // the action, so a call with a hand from the raiser's own opening range is fine (heads-up: correct).
+      const rPos = hand.pos && hand.pos[sit.raiser], steal = sit.n <= 3 || ['CO', 'BTN', 'SB'].includes(rPos);
+      if (pos === 'BB' && steal && sit.raises === 1 && d.v.call === M && sit.price <= 0.3 && open(rPos).has(code)) {
+        d = sit.n <= 3 ? V('call', OK, B, d.v.raise) : V('fold', B, OK, d.v.raise);
+        why.push(`Но на BB ты уже вложил блайнд и закрываешь торговлю: против рейза с ${rPos} (оттуда открывают широко) ` +
+          `${C} — колл ${sit.n <= 3 ? 'верен' : 'допустим'}: доплатить нужно ${U.pctNum(sit.price * 100)} от итогового банка.`);
+      }
       why.push(VS_RAISE_TEXT);
     } else if (kind === 'vs3bet') {
       if (PREMIUM.has(code)) {
@@ -217,7 +225,7 @@ const Ranges = (() => {
     if (verdict === 'mistake') lines.push(`Правильно: ${right}.`);
     if (verdict === 'acceptable') lines.push(`Лучше: ${right}.`);
     const title = verdict === 'correct' ? `✅ Префлоп: ${noun(t, sit.kind)} — верно.`
-      : verdict === 'acceptable' ? '⚠️ Префлоп: допустимо.'
+      : verdict === 'acceptable' ? `⚠️ Префлоп: ${noun(t, sit.kind)} — допустимо.`
       : `❌ Префлоп: ты сыграл «${noun(t, sit.kind)}», правильно — ${right}.`;
     return { kind: 'preflop', verdict, ok: verdict !== 'mistake', title, lines, best: d.best, verdicts: d.v, pos: sit.pos, code, situation: sit };
   }
@@ -252,10 +260,22 @@ const Ranges = (() => {
   }
 
   // 13 rows × 13 cells {code, cls} in Cards.gridCode order (row i, column j).
-  function grid(key) {
+  // key: a position, 'vsRaise' / 'vs3bet', or 'vsRaise:MP' (the hero's position). ctx = { pos, deep } (optional:
+  // deep = stack ≥ 20 raises). Against a raise the cells come from decide(), so the grid matches the verdict;
+  // without a position or stack the conditional hands (connectors, small pairs, borderline calls) are 'border'.
+  function grid(key, ctx = {}) {
+    const [kind, kpos] = String(key).split(':'), pos = ctx.pos || kpos, deep = ctx.deep;
+    const vs = (code) => {
+      const sit = { kind, pos: pos || 'MP', n: 9, raises: kind === 'vs3bet' ? 2 : 1, raiser: 1, raiseTo: 1, effStack: deep === false ? 1 : 100,
+        canRaise: true, toCall: 1, stack: 100, price: 0.5, allIn: false };
+      const d = decide(sit, code, { pos: {} }, null);
+      if (d.best === 'raise') return 'raise';
+      if (!pos && kind === 'vsRaise' && (CONNECTORS.has(code) || VS_BORDER.has(code) || code === '65s')) return 'border';
+      if (kind === 'vsRaise' && deep === undefined && SMALL_PAIRS.has(code)) return 'border';
+      return d.best === 'call' ? 'call' : d.v.call === OK ? 'border' : 'out';
+    };
     const cls = (code) => {
-      if (key === 'vsRaise') return PREMIUM.has(code) ? 'raise' : VS_CALL.has(code) ? 'call' : 'out';
-      if (key === 'vs3bet') return PREMIUM.has(code) ? 'raise' : 'out';
+      if (kind === 'vsRaise' || kind === 'vs3bet') return vs(code);
       return open(key).has(code) ? 'in' : border(key).has(code) ? 'border' : 'out';
     };
     return Array.from({ length: 13 }, (_, i) => Array.from({ length: 13 }, (_, j) => {
@@ -264,5 +284,5 @@ const Ranges = (() => {
     }));
   }
 
-  return { OPEN_TEXT, POS_INFO, open, border, situation, evaluate, hint, grid, codeRu };
+  return { OPEN_TEXT, POS_INFO, VS_RAISE_TEXT, open, border, situation, evaluate, hint, grid, codeRu };
 })();

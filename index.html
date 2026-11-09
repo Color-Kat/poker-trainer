@@ -203,7 +203,7 @@ label { cursor: pointer; }
 
 /* ---------- header ---------- */
 .g-head {
-  flex: none; display: flex; align-items: center; gap: 14px; padding: 8px 14px 8px 18px; min-height: 54px;
+  position: relative; z-index: 30; flex: none; display: flex; align-items: center; gap: 14px; padding: 8px 14px 8px 18px; min-height: 54px;
   background: linear-gradient(180deg, #101b16, #0b130f); border-bottom: 1px solid var(--line);
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
@@ -213,7 +213,8 @@ label { cursor: pointer; }
 .g-meta { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--text-dim); font-size: 13px; white-space: nowrap; }
 .hinfo { display: flex; gap: 14px; overflow: hidden; }
 .hinfo b { color: var(--text); font-weight: 650; }
-.hinfo .k { font-style: normal; }
+.hinfo .k, .hinfo .ks { font-style: normal; }
+.hinfo .ks { display: none; }
 .mode-badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid currentColor; }
 .m-learn .mode-badge { color: var(--ok); background: var(--ok-bg); }
 .m-practice .mode-badge { color: var(--info); background: var(--info-bg); }
@@ -282,9 +283,10 @@ label { cursor: pointer; }
 .pot.sp { padding: 3px 10px; font-size: 12px; }
 .pot.sp b { font-size: 13px; color: var(--text); }
 .caption {
-  min-height: 22px; font-size: 13px; color: rgba(238, 242, 236, 0.85); text-align: center; max-width: 34cqw;
+  min-height: 22px; font-size: 13px; color: rgba(238, 242, 236, 0.92); text-align: center; max-width: 34cqw;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
+.caption:not(:empty) { background: rgba(4, 22, 13, 0.62); padding: 2px 10px; border-radius: 999px; } /* ≥ 4.5:1 on the felt highlight */
 .caption.win { color: var(--brass-hi); font-weight: 650; }
 
 /* playing-card animations */
@@ -374,6 +376,7 @@ label { cursor: pointer; }
   background: #0c1611; border: 1px solid rgba(241, 207, 122, 0.28);
 }
 .posb:empty { display: none; }
+.posb::after { content: ''; position: absolute; inset: -10px -8px; } /* a finger-sized tap target */
 .seat.me .posb { background: linear-gradient(180deg, var(--brass-hi), var(--brass)); color: #23180a; border-color: #a67f2e; box-shadow: 0 0 10px rgba(241, 207, 122, 0.45); }
 .s-status {
   position: relative; z-index: 2; margin-top: -7px; min-height: 17px; padding: 1px 8px; border-radius: 999px;
@@ -420,7 +423,6 @@ label { cursor: pointer; }
 .seat.right .bubble.show { transform: none; }
 .seat.right .bubble::after { left: auto; right: 16px; }
 .bubble.show { opacity: 1; transform: translateX(-50%) scale(1); }
-.bubble.acting { font-style: italic; }
 .a-glance .av { animation: aGlance .5s ease-in-out 3; }
 .a-freeze .av { animation: aFreeze 2s ease-in-out; }
 .a-tremble .av { animation: aTremble .09s linear 18; }
@@ -479,9 +481,10 @@ label { cursor: pointer; }
 }
 .tip b { color: var(--brass-hi); }
 .veil {
-  position: absolute; inset: 0; z-index: 7; display: grid; place-items: center; pointer-events: none;
-  background: rgba(4, 10, 7, 0.45); font: italic 700 28px var(--font-display); color: var(--brass-hi); letter-spacing: 0.08em;
+  position: absolute; inset: 0; z-index: 7; display: grid; place-items: start center; padding-top: 4%; pointer-events: none;
+  background: rgba(4, 10, 7, 0.45); font: italic 700 20px var(--font-display); color: var(--brass-hi); letter-spacing: 0.08em;
 }
+.veil span { background: rgba(4, 10, 7, 0.8); padding: 6px 18px; border-radius: 999px; border: 1px solid rgba(241, 207, 122, 0.4); } /* above the board, not on it */
 
 /* ---------- action dock ---------- */
 .dock { flex: none; padding: 10px 16px 12px; background: linear-gradient(180deg, #0c1612, #08100c); border-top: 1px solid var(--line); }
@@ -505,10 +508,12 @@ label { cursor: pointer; }
 .act kbd { position: absolute; right: 7px; top: 5px; font: 600 10px var(--font-ui); opacity: 0.45; }
 .act-fold { background: #2c1517; border-color: #5f262b; color: #ffd8d8; }
 .act-fold:hover { background: #3a1b1e; }
+.act-fold span { white-space: nowrap; }
 .act-call { background: #10321f; border-color: #237049; color: #d5f8e3; }
 .act-call:hover { background: #164229; }
 .quick :disabled, .slide :disabled, .d-main :disabled { opacity: 0.35; }
-.dock.next .quick, .dock.next .slide { visibility: hidden; }
+.dock.next .quick, .dock.next .slide, .dock.idle .slide { visibility: hidden; } /* no stale amount while others act */
+.quick .btn[aria-pressed="true"] { border-color: var(--brass-hi); color: var(--brass-hi); }
 .m-tournament .d-aux .btn { display: none; }
 .m-practice .d-hint { display: none; }
 
@@ -578,7 +583,6 @@ label { cursor: pointer; }
   .dealer { --toff: 24px; width: 22px; height: 22px; font-size: 11px; }
   .felt { inset: clamp(9px, 2.8cqw, 16px); }
   .felt-print { top: 72%; font-size: clamp(11px, 3.4cqw, 16px); }
-  .caption { max-width: 60cqw; }
   .seat:not(.me) .plate { flex-direction: column; min-width: 0; width: clamp(66px, 21.5cqw, 96px); padding: 0 4px 5px; gap: 2px; border-radius: 12px; margin-top: calc(var(--av) * 0.5); }
   .seat:not(.me) .av { margin-top: calc(var(--av) * -0.5); }
   .seat:not(.me) .s-info { text-align: center; width: 100%; }
@@ -588,18 +592,26 @@ label { cursor: pointer; }
   .seat:not(.me) .s-sty { display: block; line-height: 1; margin-top: 1px; }
   .seat:not(.me) .s-stack { font-size: 13px; }
   .seat:not(.me) .sty { font-size: 9px; padding: 0 3px; }
-  .seat:not(.me) .posb { top: -8px; right: auto; left: -5px; font-size: 9px; padding: 1px 4px; }
+  .seat:not(.me) .posb { top: -8px; right: auto; left: -5px; font-size: 10.5px; padding: 1px 5px; }
+  .seat:not(.me) .s-name { font-size: 11.5px; }
+  .seat.left:not(.me) .s-cards:not(.show) { left: auto; right: calc(50% + var(--av) * 0.3); } /* backs toward the rail, off the board */
+  .ptable.n8, .ptable.n9 { --cw-me: clamp(42px, 12cqw, 60px); }
+  .ptable.n7, .ptable.n8, .ptable.n9 { --cw-board: clamp(30px, 9cqw, 50px); }
+  .ptable.n7 .bet:is(.left, .right), .ptable.n8 .bet:is(.left, .right), .ptable.n9 .bet:is(.left, .right) { --f: 0.8; } /* side bets stay by their seat, off the board */
+  .caption { max-width: 46cqw; }
+  .bubble { max-width: 130px; font-size: 11.5px; padding: 5px 8px; }
   .seat:not(.me) .s-cards { position: absolute; margin: 0; bottom: calc(100% - var(--av) * 0.62); left: calc(50% + var(--av) * 0.3); z-index: 2; }
   .seat:not(.me) .s-cards.show { left: 50%; transform: translateX(-50%); bottom: calc(100% - var(--av) * 0.4); }
   .seat.top:not(.me) .s-cards.show { bottom: auto; top: calc(100% - 4px); margin: 0; }
-  .seat:not(.me) .s-status { font-size: 10px; margin-top: -6px; padding: 0 6px; }
+  .seat:not(.me) .s-status { font-size: 11px; margin-top: -6px; padding: 0 6px; }
   .bet { font-size: 12px; padding: 1px 7px 1px 1px; }
   .bet .chip { width: 15px; height: 15px; }
   .pot { font-size: 12px; }
   .pot b { font-size: 14px; }
 }
 
-@media (max-width: 1180px) { .hinfo .k { display: none; } }
+@media (max-width: 1180px) { .hinfo .k { display: none; } .hinfo .ks { display: inline; } }
+@media (max-width: 1300px) { .m-tournament .g-nav .lbl { display: none; } } /* room for the level countdown (icons keep their titles) */
 @media (max-width: 920px) { .g-nav .lbl { display: none; } .g-nav .btn { min-width: 38px; padding: 6px 8px; } }
 
 /* ---------- < 1100 px: coach becomes a bottom sheet above the dock ---------- */
@@ -618,6 +630,8 @@ label { cursor: pointer; }
   .tab .dot { display: none; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 8px var(--warn); }
   .tab.new .dot { display: inline-block; }
   .peek { flex: 1; min-width: 0; align-self: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-faint); cursor: pointer; }
+  .side.hold .peek::before { content: 'Игра ждёт — сверни ▾, чтобы продолжить · '; color: var(--brass-hi); }
+  .game.paused .side .peek::before { content: '⏸ Пауза · '; color: var(--brass-hi); }
   .tab-x { flex: none; width: 44px; background: none; border: 0; color: var(--text-dim); font-size: 16px; cursor: pointer; transition: transform .2s; }
   .side.open .tab-x { transform: rotate(180deg); }
   .coach, .log {
@@ -644,6 +658,9 @@ label { cursor: pointer; }
   .g-meta { gap: 8px; font-size: 11.5px; }
   .hinfo { gap: 8px; }
   .hinfo .k { display: none; }
+  .hinfo .ks { display: inline; }
+  .m-tournament .hinfo .hno { display: none; }
+  .m-tournament .mode-badge { display: none; } /* the level line already says it is a tournament */ /* phones: the level and the countdown matter more than the hand number */
   .mode-badge { padding: 1px 7px; font-size: 10.5px; }
   .g-nav .lbl { display: none; }
   .g-nav .btn { min-height: 38px; min-width: 38px; padding: 6px; }
@@ -661,9 +678,7 @@ label { cursor: pointer; }
   .dock.next .d-next { grid-row: 2 / 4; grid-column: 1 / -1; } /* fill the idle sizing rows: one big thumb target */
   .dock.next .d-next .btn { height: 100%; font-size: 17px; }
 }
-@media (max-width: 380px) {
-  .hinfo span:nth-child(n+3) { display: none; }
-}
+
 
 /* ---------- landscape phones (last: overrides the phone rules): one-row dock, slimmer chrome ---------- */
 @media (max-height: 560px) and (min-width: 600px) {
@@ -683,6 +698,15 @@ label { cursor: pointer; }
   .dock.next .d-next .btn { height: auto; font-size: 14px; }
   .side-tabs { height: 34px; }
   .ptable { --cw-me: 38px; --cw-board: 30px; --cy: 44%; }
+}
+
+/* ---------- touch: controls at least 40 px ---------- */
+@media (pointer: coarse) {
+  .quick .btn, .d-aux .btn, .game .btn-sm { min-height: 40px; }
+  .g-nav .btn { min-width: 44px; min-height: 44px; } /* after .game .btn-sm: same specificity */
+  .slide input[type="number"] { min-height: 40px; }
+  .slide input[type="range"] { height: 40px; }
+  .c-q form .btn, .c-q form input { min-height: 40px; }
 }
 
 /* ===== 20-screens.css ===== */
@@ -744,7 +768,7 @@ label { cursor: pointer; }
   border: 5px dashed rgba(255, 255, 255, 0.9); box-shadow: 0 0 0 2px var(--c), 0 4px 10px rgba(0, 0, 0, 0.5);
 }
 .sc-mode-practice .sc-chip { --c: #2b5c9e; }
-.sc-mode-tournament .sc-chip { --c: #9e1b30; }
+.sc-mode-tournament .sc-chip { --c: #8f6a22; } /* brass, like the in-game mode badge */
 .sc-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 28px; }
 .sc-how { border-top: 1px solid var(--line); padding-top: 20px; }
 .sc-how ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px 32px; }
@@ -819,6 +843,7 @@ label { cursor: pointer; }
 .sc-mdate:empty { display: none; }
 .sc-tag { flex: 0 0 132px; color: var(--brass); font-size: 13px; font-weight: 600; }
 .sc-mtitle { flex: 1 1 300px; }
+.sc-mcount { color: var(--text-dim); font-size: 14px; margin: 0 0 6px; }
 
 /* ---------- cheat sheet ---------- */
 .sc-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
@@ -843,6 +868,14 @@ label { cursor: pointer; }
 .sc-vs { margin: 0; display: grid; grid-template-columns: 170px 1fr; gap: 8px 16px; }
 .sc-vs dt { font-weight: 700; color: var(--brass-hi); }
 .sc-vs dd { margin: 0; color: var(--text-dim); }
+.sc-nw { white-space: nowrap; }
+.sc-cards { display: grid; gap: 10px; margin: 4px 0 14px; }
+.sc-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 12px; }
+.sc-card > small { color: var(--text-faint); font-size: 12px; }
+.sc-card dl { margin: 8px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.sc-card dt { font-size: 12px; color: var(--text-faint); }
+.sc-card dd { margin: 0; font-size: 14px; }
+@media (min-width: 601px) { .sc-m { display: none !important; } }
 
 /* ---------- range grid ---------- */
 .sc-grid { display: grid; grid-template-columns: repeat(13, minmax(0, 1fr)); gap: 2px; max-width: 560px; margin: 0 auto 14px; }
@@ -894,6 +927,7 @@ label { cursor: pointer; }
   .sc-fan { right: 28px; --cw: 60px; }
 }
 @media (max-width: 600px) {
+  .sc-d { display: none !important; }
   .sc { padding: 14px 16px 44px; }
   .sc-felt { padding: 24px 20px 22px; min-height: 0; }
   .sc-rail { border-radius: 28px; padding: 7px; }
@@ -912,13 +946,31 @@ label { cursor: pointer; }
   .sc-bots { grid-template-columns: 1fr; }
   .sc-mdate { flex-basis: auto; }
   .sc-tag { flex-basis: auto; }
-  .sc-tabs { gap: 5px; }
-  .sc-tab { padding: 7px 9px; font-size: 13px; }
+  .sc-tabs { gap: 5px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -16px; padding-inline: 16px; }
+  .sc-tabs::-webkit-scrollbar { display: none; }
+  .sc-tab { flex: none; padding: 7px 11px; font-size: 13px; white-space: nowrap; }
+  .sc-open { min-width: 0; }
+  .sc-open th:nth-child(2), .sc-open td:nth-child(2) { display: none; }
+  .sc-formula .sc-eq { font-size: 17px; }
+  .sc-meter { width: 44px; margin-right: 6px; }
+  .modal .sc-sec { padding-inline: 0; border: 0; background: none; box-shadow: none; }
   .sc-tw .tbl th, .sc-tw .tbl td { padding: 7px 7px; }
   .sc-wide th:first-child, .sc-wide td:first-child { position: sticky; left: 0; z-index: 1; background: #18261f; box-shadow: 1px 0 0 var(--line-soft); }
   .sc-vs { grid-template-columns: 1fr; gap: 2px; }
   .sc-vs dd { margin-bottom: 8px; }
   .sc-place { font-size: 30px; }
+}
+@media (pointer: coarse) {
+  .sc-head .btn { min-height: 40px; }
+  .modal-head [data-x] { min-width: 44px; min-height: 44px; }
+  .sc-tab { min-height: 40px; }
+  .sc-seg span { min-height: 40px; }
+  .sc-field input[type="range"] { height: 40px; }
+  .sc-link { padding: 10px 0; margin: -10px 0; } /* bigger hit area, same line height */
+  .sc-pos-btn { min-width: 44px; text-align: left; }
+  .sc-switch input[type="checkbox"] { width: 52px; height: 32px; border-radius: 16px; }
+  .sc-switch input[type="checkbox"]::after { width: 24px; height: 24px; }
+  .sc-switch input[type="checkbox"]:checked::after { transform: translateX(20px); }
 }
 
 </style>
@@ -1696,7 +1748,8 @@ const Bots = (() => {
   const scaryBoard = (prev, board, over) => board.slice(prev.length).some((c) => Cards.rank(c) > over)
     || (suitMax(board) >= 3 && suitMax(board) > suitMax(prev)) || (runMax(board) >= 3 && runMax(board) > runMax(prev));
 
-  // → { cls, made, cat, fd, sOuts (ranks completing a straight), outs, pair, pairRank, aceHigh, over (two overcards) }
+  // → { cls, made, cat, fd, sOuts (ranks completing a straight), outs, pair, pairRank, topPair (top pair or overpair),
+  //     aceHigh, over (two overcards) }
   function analyze(hole, board) {
     const s = HandEval.score(hole.concat(board)), cat = s >> 20;
     const [h1, h2] = hole.map(Cards.rank);
@@ -1729,7 +1782,7 @@ const Bots = (() => {
     }
     const outs = (fd ? 9 : 0) + 4 * sOuts - (fd ? sOuts : 0);
     const cls = made === 'strong' || made === 'medium' ? made : board.length < 5 && (fd || sOuts >= 2) ? 'draw' : 'bluff';
-    return { cls, made, cat, fd, sOuts, outs, pair: made !== 'none', pairRank,
+    return { cls, made, cat, fd, sOuts, outs, pair: made !== 'none', pairRank, topPair: pairRank > 0 && pairRank >= br[0],
       aceHigh: made === 'none' && (h1 === 14 || h2 === 14), over: made === 'none' && Math.min(h1, h2) > br[0] };
   }
 
@@ -1758,13 +1811,14 @@ const Bots = (() => {
   const potBet = (L, frac) => to(L.myBet + L.toCall + frac * (L.pot + L.toCall));
   const rnd = (a, b) => a + U.rng() * (b - a);
 
-  // Intent → legal engine action: bets > 100 rounded to 5, never below minTo, no crumbs left behind, no free folds.
+  // Intent → legal engine action: live-like round bets (multiples of 5, of 25 over 1000), never below minTo, no crumbs
+  // left behind, no free folds.
   function legalize(a, L) {
     if (a.type === 'raise') {
       if (!L.canRaise) return L.toCall > 0 ? CALL : CHECK;
-      let t = Math.round(a.to);
-      if (t > 100) t = Math.round(t / 5) * 5;
-      if (t < L.minTo) t = L.minTo > 100 ? Math.ceil(L.minTo / 5) * 5 : L.minTo;
+      const step = Math.max(a.to, L.minTo) > 1000 ? 25 : 5;
+      let t = Math.round(a.to / step) * step;
+      if (t < L.minTo) t = Math.ceil(L.minTo / step) * step;
       if (t >= L.maxTo || L.maxTo - t < 0.3 * (L.pot + 2 * t - L.myBet - L.currentBet)) t = L.maxTo;
       return { type: 'raise', to: t };
     }
@@ -1801,7 +1855,8 @@ const Bots = (() => {
   const PAIRS = RG('22+');
   // ponytail: per-position "top X% of hands" thresholds (Equity.holeTopPct), calibrated with tools/sim-bots.js on
   // random all-bot lineups; re-run it after changing any number here.
-  const ROCK_OPEN = { UTG: 0.12, 'UTG+1': 0.12, MP: 0.12, LJ: 0.12, HJ: 0.12, CO: 0.13, BTN: 0.16, SB: 0.11 };
+  // The rock opens the ТЗ 6.1 table cut to its top X% (always a subset: "Камень — уже").
+  const ROCK_OPEN = { UTG: 0.08, 'UTG+1': 0.08, MP: 0.08, LJ: 0.08, HJ: 0.12, CO: 0.15, BTN: 0.2, SB: 0.14 };
   const REG_ISO = { 'UTG+1': 0.14, MP: 0.2, LJ: 0.22, HJ: 0.26, CO: 0.33, BTN: 0.4, SB: 0.3 }; // tight early, wide late
   const SPECULATIVE = RG('22+, A2s+, 54s, 65s, 76s, 87s, 98s, T9s, JTs, QJs, KQs'); // over-limp material
   const STATION_LIMP = { UTG: 0.5, 'UTG+1': 0.5, MP: 0.55, LJ: 0.55, HJ: 0.6, CO: 0.65, BTN: 0.7, SB: 0.75 };
@@ -1858,7 +1913,7 @@ const Bots = (() => {
         // too (raise to isolate), where speculative hands may over-limp in late position — as the coach teaches.
         if (L.canCheck) return (f.limpers <= 1 ? OPEN.BB.has(code) : top <= 0.12) ? to(bb * (3 + f.limpers)) : CHECK;
         const iso = f.limpers && top <= REG_ISO[pos]; // limpers are usually weak: isolate a bit wider than the table
-        if (OPEN[pos].has(code) || (BORDER[pos].has(code) && U.chance(0.5)) || iso) return to(bb * (2.5 + f.limpers));
+        if (OPEN[pos].has(code) || (BORDER[pos].has(code) && U.chance(f.late || pos === 'SB' ? 1 : 0.5)) || iso) return to(bb * (2.5 + f.limpers));
         return f.limpers && (f.late || pos === 'SB') && SPECULATIVE.has(code) ? CALL : FOLD;
       }
       if (nRaises === 1) {
@@ -1878,15 +1933,16 @@ const Bots = (() => {
       if (f.allin) return ROCK_4B.has(code) ? CALL : commit(f, 0);
       if (nRaises === 0) {
         if (L.canCheck) return top <= 0.05 ? to(bb * (3 + f.limpers)) : CHECK;
-        if (top <= ROCK_OPEN[pos]) return to(bb * (3 + f.limpers));
-        // passive: over-limps hoping to hit, limps small pairs late for a cheap set
-        if (f.limpers && (PAIRS.has(code) || top <= 0.2)) return CALL;
-        return (pos === 'SB' || f.late) && PAIRS.has(code) ? CALL : FOLD;
+        if (OPEN[pos].has(code) && top <= ROCK_OPEN[pos]) return to(bb * (3 + f.limpers));
+        // passive: over-limps hoping to hit, limps pairs for a cheap set
+        if (f.limpers && top <= 0.2) return CALL;
+        return PAIRS.has(code) || ((f.late || pos === 'SB') && top <= 0.22) ? CALL : FOLD;
       }
       if (nRaises === 1) {
         if (PREMIUM.has(code)) return reraise(f, 3);
         if (ROCK_CALL.has(code)) return CALL;
         if (PAIRS.has(code) && f.raiseBB <= 5 && f.eff >= 20 * f.raiseBB) return CALL; // set-mining
+        if (pos === 'BB' && f.raiseBB <= 3 && top <= 0.2) return CALL; // defends the big blind passively
         return FOLD;
       }
       if (!ROCK_4B.has(code)) return FOLD;
@@ -1966,7 +2022,10 @@ const Bots = (() => {
         return U.chance(0.35) ? potBet(L, 0.5) : CALL;
       }
       if (cls === 'strong') return bf > 1.2 && f.hs < 0.85 && U.chance(0.5) ? FOLD : CALL;
-      if (cls === 'medium') return U.chance((bf <= 0.4 ? 0.6 : bf <= 0.75 ? 0.2 : 0.03) * (f.nOpp > 1 ? 0.6 : 1)) ? CALL : FOLD;
+      if (cls === 'medium') { // a nit, not a fool: top pair / an overpair calls up to half pot; weaker pairs give up
+        if (f.a.topPair && bf <= 0.5) return U.chance(f.nOpp > 1 ? 0.6 : 0.75) ? CALL : FOLD;
+        return U.chance((bf <= 0.4 ? 0.6 : bf <= 0.75 ? 0.2 : 0.03) * (f.nOpp > 1 ? 0.6 : 1)) ? CALL : FOLD;
+      }
       if (cls === 'draw') return bf <= 0.4 && f.eq >= f.odds ? CALL : FOLD;
       return FOLD;
     },
@@ -1979,7 +2038,9 @@ const Bots = (() => {
       if (f.nuts && L.canRaise && U.chance(0.55)) return potBet(L, f.street === 'flop' ? 0.5 : rnd(1, 1.3)); // monsters: big later
       if (cls !== 'bluff' || a.pair || (a.sOuts === 1 && !f.river)) return CALL;
       if ((a.aceHigh || a.over) && bf <= 0.75) return U.chance(f.river ? 0.5 : 0.9) ? CALL : FOLD;
-      return U.chance({ flop: 0.45, turn: 0.3, river: 0.12 }[f.street]) ? CALL : FOLD;
+      // pure air: sticky on the flop, but big turn/river bets get through (none at all: a river bet of ¾ pot or more)
+      if (f.street === 'flop') return U.chance(0.45) ? CALL : FOLD;
+      return U.chance(f.river ? (bf < 0.75 ? 0.12 * (1 - bf) : 0) : 0.3 * Math.max(0, 1 - bf)) ? CALL : FOLD;
     },
     reg(f) {
       const { L, cls, bf, a, street } = f;
@@ -2027,9 +2088,11 @@ const Bots = (() => {
     },
   };
 
-  // Timing tells: honest styles tank with monsters and snap-fold junk; the actor does the opposite.
-  function think(style, action, strong) {
+  // Timing tells: honest styles tank with monsters and snap-fold junk; the actor does the opposite. Preflop folds are
+  // trivial for every style: a quick snap keeps the orbit moving.
+  function think(style, action, strong, preflop) {
     const aggressive = action.type === 'raise', easy = action.type === 'fold' || action.type === 'check';
+    if (preflop && action.type === 'fold') return U.randInt(400, 800);
     let ms = U.randInt(700, 1600);
     if (style === 'rock' || style === 'station') {
       if (aggressive && strong) ms += U.randInt(900, 1800);
@@ -2043,8 +2106,16 @@ const Bots = (() => {
     return Math.round(U.clamp(ms, 400, 3500));
   }
 
+  // Calling all-in for less than the bet: only up to our own total can be won from each player (side pot), so the
+  // decision sees that capped pot, not the shover's whole stack (as Coach does for the hero).
+  function capPot(hand, seat, L) {
+    if (L.toCall >= L.currentBet - L.myBet) return L;
+    const paid = (s) => hand.committed[s] - ((hand.returned && hand.returned[s]) || 0), lim = paid(seat) + L.toCall;
+    return { ...L, pot: hand.seats.reduce((a, s) => a + Math.min(paid(s), lim), 0) };
+  }
+
   function decide({ table, hand, seat, legal, human } = {}) {
-    const L = legal || Engine.legal(hand), p = table.players[seat], st = base(p);
+    const L = capPot(hand, seat, legal || Engine.legal(hand)), p = table.players[seat], st = base(p);
     let intent, strong;
     if (hand.street === 'preflop') {
       const f = preInfo(table, hand, seat, L);
@@ -2057,7 +2128,7 @@ const Bots = (() => {
       strong = f.cls === 'strong';
     }
     const action = legalize(intent, L);
-    return { action, thinkMs: think(p.style, action, strong) };
+    return { action, thinkMs: think(p.style, action, strong, hand.street === 'preflop') };
   }
 
   // ---------- tells ----------
@@ -2112,9 +2183,13 @@ const Bots = (() => {
       default: return honest(seat, shown, truth, street, 'subtle');
     }
   }
-  // Noise looks exactly like the style's real tells (so it cannot be filtered out by its wording), for a random truth.
+  // Noise looks exactly like the style's real tells (so it cannot be filtered out by its wording), for a made-up
+  // truth drawn as often as real ones come: only ~1 in 9 street events really makes a hand strong (measured with all-bot
+  // games for every style), so a 50/50 draw would swamp the rare real "strength" tells. This way about 85% of each
+  // signal stays true.
+  const NOISE_STRONG = 0.12;
   const noise = (style, seat, truth, street) =>
-    ({ ...show(style, seat, U.chance(0.5) ? 'strong' : 'weak', street), truth, acting: false, random: true });
+    ({ ...show(style, seat, U.chance(NOISE_STRONG) ? 'strong' : 'weak', street), truth, acting: false, random: true });
 
   // How the new card(s) changed the bot's holding: 'strong' | 'weak' | 'neutral'.
   function streetTruth(hole, prev, board) {
@@ -2335,6 +2410,14 @@ const Ranges = (() => {
         why.push(CONNECTORS.has(code) ? 'Одномастные коннекторы против рейза коллируют только на BTN/CO — здесь сброс.'
           : `${C} ${enters(false)} в список рук для игры против рейза — сброс.`);
       }
+      // BB against a steal (late position, or any raise at a table of 2–3): the blind is already in and the BB closes
+      // the action, so a call with a hand from the raiser's own opening range is fine (heads-up: correct).
+      const rPos = hand.pos && hand.pos[sit.raiser], steal = sit.n <= 3 || ['CO', 'BTN', 'SB'].includes(rPos);
+      if (pos === 'BB' && steal && sit.raises === 1 && d.v.call === M && sit.price <= 0.3 && open(rPos).has(code)) {
+        d = sit.n <= 3 ? V('call', OK, B, d.v.raise) : V('fold', B, OK, d.v.raise);
+        why.push(`Но на BB ты уже вложил блайнд и закрываешь торговлю: против рейза с ${rPos} (оттуда открывают широко) ` +
+          `${C} — колл ${sit.n <= 3 ? 'верен' : 'допустим'}: доплатить нужно ${U.pctNum(sit.price * 100)} от итогового банка.`);
+      }
       why.push(VS_RAISE_TEXT);
     } else if (kind === 'vs3bet') {
       if (PREMIUM.has(code)) {
@@ -2395,7 +2478,7 @@ const Ranges = (() => {
     if (verdict === 'mistake') lines.push(`Правильно: ${right}.`);
     if (verdict === 'acceptable') lines.push(`Лучше: ${right}.`);
     const title = verdict === 'correct' ? `✅ Префлоп: ${noun(t, sit.kind)} — верно.`
-      : verdict === 'acceptable' ? '⚠️ Префлоп: допустимо.'
+      : verdict === 'acceptable' ? `⚠️ Префлоп: ${noun(t, sit.kind)} — допустимо.`
       : `❌ Префлоп: ты сыграл «${noun(t, sit.kind)}», правильно — ${right}.`;
     return { kind: 'preflop', verdict, ok: verdict !== 'mistake', title, lines, best: d.best, verdicts: d.v, pos: sit.pos, code, situation: sit };
   }
@@ -2430,10 +2513,22 @@ const Ranges = (() => {
   }
 
   // 13 rows × 13 cells {code, cls} in Cards.gridCode order (row i, column j).
-  function grid(key) {
+  // key: a position, 'vsRaise' / 'vs3bet', or 'vsRaise:MP' (the hero's position). ctx = { pos, deep } (optional:
+  // deep = stack ≥ 20 raises). Against a raise the cells come from decide(), so the grid matches the verdict;
+  // without a position or stack the conditional hands (connectors, small pairs, borderline calls) are 'border'.
+  function grid(key, ctx = {}) {
+    const [kind, kpos] = String(key).split(':'), pos = ctx.pos || kpos, deep = ctx.deep;
+    const vs = (code) => {
+      const sit = { kind, pos: pos || 'MP', n: 9, raises: kind === 'vs3bet' ? 2 : 1, raiser: 1, raiseTo: 1, effStack: deep === false ? 1 : 100,
+        canRaise: true, toCall: 1, stack: 100, price: 0.5, allIn: false };
+      const d = decide(sit, code, { pos: {} }, null);
+      if (d.best === 'raise') return 'raise';
+      if (!pos && kind === 'vsRaise' && (CONNECTORS.has(code) || VS_BORDER.has(code) || code === '65s')) return 'border';
+      if (kind === 'vsRaise' && deep === undefined && SMALL_PAIRS.has(code)) return 'border';
+      return d.best === 'call' ? 'call' : d.v.call === OK ? 'border' : 'out';
+    };
     const cls = (code) => {
-      if (key === 'vsRaise') return PREMIUM.has(code) ? 'raise' : VS_CALL.has(code) ? 'call' : 'out';
-      if (key === 'vs3bet') return PREMIUM.has(code) ? 'raise' : 'out';
+      if (kind === 'vsRaise' || kind === 'vs3bet') return vs(code);
       return open(key).has(code) ? 'in' : border(key).has(code) ? 'border' : 'out';
     };
     return Array.from({ length: 13 }, (_, i) => Array.from({ length: 13 }, (_, j) => {
@@ -2442,7 +2537,7 @@ const Ranges = (() => {
     }));
   }
 
-  return { OPEN_TEXT, POS_INFO, open, border, situation, evaluate, hint, grid, codeRu };
+  return { OPEN_TEXT, POS_INFO, VS_RAISE_TEXT, open, border, situation, evaluate, hint, grid, codeRu };
 })();
 
 // ===== 61-coach.js =====
@@ -2504,7 +2599,16 @@ const Coach = (() => {
     // straights, flushes, full houses made with a hole card
     if (cat >= CAT.STRAIGHT && (board.length < 5 || sc > HandEval.score(board))) [strength, label] = ['strong', HandEval.CAT_RU[cat].toLowerCase()];
     else if (board.length === 5 && sc === HandEval.score(board)) [strength, label] = ['none', 'играет борд'];
-    return { cat, name: HandEval.describe(sc), strength, label };
+    const name = HandEval.describe(sc);
+    // How to say it to a beginner: a pair that lives only on the board is shared, not the hero's.
+    let ru = lowerFirst(name);
+    const bp = Math.max(0, ...br.filter((r) => on(r) >= 2 && !hr.includes(r)));
+    if (strength === 'none' && cat > CAT.HIGH && label !== 'играет борд') ru = `только старшая карта — ${Cards.rankRu(Math.max(...hr))} (${ru} на борде общая)`;
+    else if (cat === CAT.TWO_PAIR && bp && ['оверпара', 'топ-пара', 'слабая пара'].includes(label)) {
+      const mine = hr[0] === hr[1] ? hr[0] : hr.find((r) => on(r));
+      ru = `пара ${GP(mine)} (${label}) + пара ${GP(bp)} на борде — общая`;
+    }
+    return { cat, name, strength, label, ru };
   }
 
   // ---------- outs (structural, hero-specific, next card only) ----------
@@ -2512,6 +2616,8 @@ const Coach = (() => {
     pair: ['спаривает борд, у соперника может быть фулл-хаус', 'спаривают борд, у соперника может быть фулл-хаус'],
     flush: ['даёт стрит, но на борде будет минимум 3 карты одной масти: у соперника может быть флеш', 'дают стрит, но на борде будет минимум 3 карты одной масти: у соперника может быть флеш'],
     nonnut: ['даёт не натсовый флеш: у соперника может быть флеш старше', 'дают не натсовый флеш: у соперника может быть флеш старше'],
+    flush2: ['улучшает руку, но на борде будет минимум 3 карты одной масти: у соперника может быть флеш', 'улучшают руку, но на борде будет минимум 3 карты одной масти: у соперника может быть флеш'],
+    straight2: ['улучшает руку, но на борде будет 4 карты к стриту: у соперника может быть стрит', 'улучшают руку, но на борде будет 4 карты к стриту: у соперника может быть стрит'],
   };
   const NO_OUTS = { total: 0, clean: 0, dirty: 0, over: 0, list: [], cleanList: [], dirtyList: [], overList: [], draws: [] };
   const fourIn = (m, x) => [0, 1, 2, 3].every((i) => m & (1 << (x + i)));
@@ -2573,17 +2679,29 @@ const Coach = (() => {
         add('boat', ofRank(...paired), (n) => `Две пары: фулл-хаус дают оставшиеся ${NP(paired[0])} и ${NP(paired[1])} (${outsW(n)}).`);
       } else if (paired.length === 1) {
         const r = paired[0], other = hr.find((x) => x !== r);
-        add('trips', ofRank(r), (n) => `Пара ${GP(r)}: тройку дают оставшиеся ${NP(r)} (${outsW(n)}).`);
-        if (!on(other)) add('twopair', ofRank(other), (n) => `Две пары дают оставшиеся ${NP(other)} (${outsW(n)}).`);
+        // on a paired board the "trips" card makes a full house and the "two pair" card only a higher two pair
+        add('trips', ofRank(r), (n, cs) => (HandEval.cat(HandEval.score([...all, cs[0]])) >= CAT.FULL_HOUSE
+          ? `Пара ${GP(r)} при паре на борде: фулл-хаус дают оставшиеся ${NP(r)} (${outsW(n)}).` : `Пара ${GP(r)}: тройку дают оставшиеся ${NP(r)} (${outsW(n)}).`));
+        if (!on(other)) add('twopair', ofRank(other), (n) => `${curCat >= CAT.TWO_PAIR ? 'Две пары старше' : 'Две пары'} дают оставшиеся ${NP(other)} (${outsW(n)}).`);
       }
     }
     const list = [...new Set(draws.flatMap((d) => d.cards))], inList = new Set(list);
     const dirtyCode = (x) => {
-      const cat = HandEval.cat(HandEval.score([...all, x]));
+      const cat = HandEval.cat(HandEval.score([...all, x])), nb = [...board, x];
       if ((cat === CAT.STRAIGHT || cat === CAT.FLUSH) && br.includes(R(x))) return 'pair';
-      if (cat === CAT.STRAIGHT && [0, 1, 2, 3].some((s) => [...board, x].filter((c) => S(c) === s).length >= 3)) return 'flush';
-      const mine = hole.filter((c) => S(c) === S(x));
-      if (cat === CAT.FLUSH && mine.length === 1 && unseen.some((c) => c !== x && S(c) === S(x) && R(c) > R(mine[0]))) return 'nonnut';
+      const flushy = [0, 1, 2, 3].some((s) => nb.filter((c) => S(c) === s).length >= 3);
+      if (cat === CAT.STRAIGHT && flushy) return 'flush';
+      const mine = hole.filter((c) => S(c) === S(x)), topMine = Math.max(0, ...mine.map(R));
+      // counted before the out falls (x included), so every card of the same draw gets the same answer
+      const higher = unseen.filter((c) => (mine.length === 2 || c !== x) && S(c) === S(x) && R(c) > topMine).length;
+      // one suited hole card: any single higher card beats us; two: only a really low flush (7+ higher cards unseen,
+      // e.g. 5♥4♥ on A♥T♥) — a 9-high flush is beaten by few two-card combos. ponytail: fixed threshold, not a combo count
+      if (cat === CAT.FLUSH && (mine.length === 1 ? higher > 0 : higher >= 7)) return 'nonnut';
+      if (cat < CAT.STRAIGHT) { // set / trips / two pair: the same board danger as for straights
+        if (flushy) return 'flush2';
+        const nm = nb.reduce((m, c) => m | (1 << R(c)), 0);
+        if ([...Array(13)].some((_, i) => HandEval.straightTop(nm | (1 << (i + 2))))) return 'straight2';
+      }
       return null;
     };
     const dirtyList = [];
@@ -2719,11 +2837,16 @@ const Coach = (() => {
       sp.estEq = estimateEq(hole, board, oppSeats.map((s) => ({ base: baseOf(P(s)), frac: s === bettor ? sizeFrac : 0.33 })));
     }
     Object.assign(sp, kind === 'draw' || (kind === 'nodraw' && !river) ? drawVerdicts(sp) : madeVerdicts(sp));
-    sp.questions = kind === 'made' || river ? ['potodds'] : facing ? ['outs', 'cards', 'equity', 'potodds'] : ['outs'];
+    // a made hand with a real draw on top (top pair + flush draw …) still asks the outs questions (SPEC 7)
+    sp.drawToo = kind === 'made' && !river && facing && outs.draws.some((d) => REAL_DRAWS.includes(d.type));
+    sp.questions = (kind === 'made' && !sp.drawToo) || river ? ['potodds'] : facing ? ['outs', 'cards', 'equity', 'potodds'] : ['outs'];
     return sp;
   }
 
   const B = 'best', OK = 'ok', M = 'mistake';
+  const REAL_DRAWS = ['flush', 'oesd', 'double', 'straight'];
+  // Overcards were accepted as outs (small bet, heads-up) and with them the rule pays for the call.
+  const overCall = (sp) => sp.facing && sp.overOk && ruleOf(sp)(sp.correctOuts + sp.outs.over) >= sp.needed && sp.ruleEq < sp.needed;
   function drawVerdicts(sp) {
     const o = sp.correctOuts, fe = sp.foldEq, folds = fe === 'high' || fe === 'medium';
     let best, v;
@@ -2739,17 +2862,31 @@ const Coach = (() => {
       v = { ...v, call: B, fold: v.fold === M ? M : OK };
       if (best === 'fold') best = 'call';
     }
+    if (overCall(sp) && v.call === M) v = { ...v, call: OK }; // the answers just accepted must not make the call a mistake
     if (!sp.canRaise) delete v.raise;
     return { best, verdicts: v };
   }
   const showdownCall = (sp) => sp.facing && sp.estEq != null && sp.ruleEq < sp.needed && sp.estEq * 100 >= sp.needed;
   // The estimate is a rough range model: within 3 pp of the price (less for tiny prices) call and fold are both acceptable.
-  const isClose = (sp) => Math.abs(sp.estEq * 100 - sp.needed) < Math.min(3, sp.needed / 4);
+  // A Monte Carlo range model is rough: within 5 pp of the price (less for tiny prices) both options are acceptable.
+  const isClose = (sp) => Math.abs(sp.estEq * 100 - sp.needed) < Math.min(5, sp.needed / 4);
+  // Value-raise thresholds scale with the number of opponents: the fair share is 1 / (players in the pot).
+  const raiseBar = (sp) => { const fair = 1 / (sp.nOpp + 1); return { best: Math.min(0.75, 1.6 * fair), ok: Math.min(0.65, 1.3 * fair) }; };
   function madeVerdicts(sp) {
-    const eq = sp.estEq, nutsRaise = sp.bigLate && sp.made.strength !== 'strong', close = isClose(sp);
+    const eq = sp.estEq, m = sp.made, nutsRaise = sp.bigLate && m.strength !== 'strong', close = isClose(sp), bar = raiseBar(sp);
     let res;
-    if (nutsRaise || eq * 100 < sp.needed) res = { best: 'fold', verdicts: { fold: B, call: close && !nutsRaise ? OK : M, raise: M } };
-    else res = { best: 'call', verdicts: { call: B, raise: eq >= 0.75 ? B : eq >= 0.65 ? OK : M, fold: close ? OK : M } };
+    if (m.strength === 'none') {
+      // no pair of your own (the board pair is shared): folding is never a mistake; calling is at most acceptable,
+      // and only when the price is small or the bettor is known to bluff a lot
+      const call = eq * 100 >= sp.needed && (sp.villain.revealed || sp.sizeFrac < 0.5) ? OK : M;
+      res = { best: 'fold', verdicts: { fold: B, call, raise: M } };
+    } else if (nutsRaise || eq * 100 < sp.needed) res = { best: 'fold', verdicts: { fold: B, call: close && !nutsRaise ? OK : M, raise: M } };
+    else {
+      const raise = eq >= bar.best ? B : eq >= bar.ok || m.strength === 'strong' ? OK : M;
+      // a weak pair vs a hidden style: the player cannot know the bettor bluffs a lot, so folding is no blunder
+      const fold = close || (m.strength === 'weak' && !sp.villain.revealed) ? OK : M;
+      res = { best: 'call', verdicts: { call: B, raise, fold } };
+    }
     if (!sp.canRaise) delete res.verdicts.raise;
     return res;
   }
@@ -2776,7 +2913,9 @@ const Coach = (() => {
 
   // ---------- answer checks ----------
   const fb = (kind, verdict, title, lines) => ({ kind, verdict, title, lines, ok: verdict !== 'mistake' });
-  const num = (v) => (typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')));
+  // strict: '9,5' and '30%' are numbers, '12abc' and '0x10' are not
+  const num = (v) => (typeof v === 'number' ? v : /^\s*-?\d+([.,]\d+)?\s*%?\s*$/.test(String(v)) ? parseFloat(String(v).replace(',', '.')) : NaN);
+  const numRu = (x) => (Math.abs(x) >= 1e6 ? 'больше миллиона' : String(+x.toFixed(2)).replace('.', ',')); // '9,5', never '1e+21'
   const ruleOf = (sp) => (o) => (sp.cardsToSee === 1 ? o * 2 : o * 4 - Math.max(0, o - 8));
   const formula = (sp, o) => (sp.cardsToSee === 1 ? `${o} × 2 = ${o * 2}%` : o > 8 ? `${o} × 4 − (${o} − 8) = ${ruleOf(sp)(o)}%` : `${o} × 4 = ${o * 4}%`);
   const cardsNote = (sp) => (sp.cardsToSee === 2 ? '(две карты: олл-ин на флопе)' : sp.street === 'turn' ? '(одна карта: впереди только ривер)' : '(одна карта, ставка не олл-ин)');
@@ -2785,17 +2924,25 @@ const Coach = (() => {
   const accOf = (r) => { const n = Cards.rankRu(r); return n.endsWith('а') ? n.slice(0, -1) + 'у' : Cards.rankRu(r, Cards.GEN); };
   function overNote(sp) {
     const ranks = [...new Set(sp.outs.overList.map(R))].sort((a, b) => b - a);
-    const names = cap(joinRu(ranks.map(NP))), pairOf = Cards.rankRu(ranks[0], Cards.GEN);
-    if (!sp.overOk) return `${names} не считаем: ${sp.multiway ? 'соперников несколько' : 'соперник ставил крупно'}, и пары ${pairOf} может не хватить.`;
+    const names = cap(joinRu(ranks.map(NP)));
+    // on a board with trips the "pair" is a full house
+    const boat = HandEval.cat(HandEval.score([...sp.hole, ...sp.board, sp.outs.overList[0]])) >= CAT.FULL_HOUSE;
+    const what = boat ? 'фулл-хауса' : `пары ${Cards.rankRu(ranks[0], Cards.GEN)}`;
+    if (!sp.overOk) {
+      const why = sp.multiway ? 'соперников несколько' : sp.sizeFrac >= 0.66 ? 'соперник ставил крупно' : `ставка соперника немаленькая (${pctR(sp.sizeFrac * 100)} банка)`;
+      return `${names} не считаем: ${why}, и ${what} может не хватить.`;
+    }
     const how = ranks.length > 1 ? `${names} можно посчитать как оверкарты, по 3 аута на каждую` : `${cap(accOf(ranks[0]))} можно посчитать как оверкарту — ещё 3 аута`;
-    return `${how}: ${sp.facing ? 'ставка небольшая' : 'соперник не ставил'}, и пары ${pairOf} может хватить. Тогда ${sp.correctOuts + sp.outs.over} — тоже верно.`;
+    return `${how}: ${sp.facing ? 'ставка небольшая' : 'соперник не ставил'}, и ${what} может хватить. Тогда ${sp.correctOuts + sp.outs.over} — тоже верно.`;
   }
   function outsLines(sp) {
     const o = sp.outs, lines = o.draws.map((d) => d.text);
     if (!o.draws.length) lines.push('Ни одна карта не сделает твою руку сильной: дро нет — 0 аутов.');
     else if (o.draws.length > 1) {
       const sum = U.sum(o.draws.map((d) => d.n)), dup = sum - o.total;
-      lines.push(`Всего: ${o.draws.map((d) => d.n).join(' + ')}${dup ? ` − ${dup} (эти карты посчитаны дважды)` : ''} = ${outsW(o.total)}.`);
+      const twice = o.list.filter((c) => o.draws.filter((d) => d.cards.includes(c)).length > 1).map(Cards.str);
+      const dupTxt = dup ? ` − ${dup} (${twice.join(', ')}: ${dup > 1 ? 'эти карты посчитаны' : 'эта карта посчитана'} дважды)` : '';
+      lines.push(`Всего: ${o.draws.map((d) => d.n).join(' + ')}${dupTxt} = ${outsW(o.total)}.`);
     }
     if (o.over) lines.push(overNote(sp));
     if (o.dirty) {
@@ -2823,11 +2970,13 @@ const Coach = (() => {
   function check(spot, qid, value, answers = {}) {
     const sp = spot, x = num(value), rule = ruleOf(sp);
     const said = (s) => (Number.isFinite(x) ? `ты указал ${s}` : 'ты ничего не указал');
+    const xs = Number.isFinite(x) ? numRu(x) : '';
     if (qid === 'outs') {
       const hit = sp.acceptedOuts.find((a) => Math.abs(x - a) <= 1);
       const lines = outsLines(sp);
-      if (hit === undefined) return fb('outs', M, `❌ Ауты: ${said(x)}, правильно ${sp.correctOuts}.`, lines);
-      return fb('outs', 'correct', hit === sp.correctOuts ? `✅ Ауты: ${sp.correctOuts} — верно.` : `✅ Ауты: ${x} — засчитано (с оверкартами; без них ${sp.correctOuts}).`, lines);
+      if (hit === undefined) return fb('outs', M, `❌ Ауты: ${said(xs)}, правильно ${sp.correctOuts}.`, lines);
+      const near = x !== hit ? ` (ты указал ${xs}, допуск ±1)` : '';
+      return fb('outs', 'correct', hit === sp.correctOuts ? `✅ Ауты: ${sp.correctOuts} — верно${near}.` : `✅ Ауты: ${hit} — засчитано (с оверкартами; без них ${sp.correctOuts})${near}.`, lines);
     }
     if (qid === 'cards') {
       const w = (k) => (k === 2 ? 'две' : 'одна');
@@ -2843,17 +2992,22 @@ const Coach = (() => {
         return fb('equity', 'correct', hit === sp.correctOuts ? `✅ Эквити: ${formula(sp, hit)} ${note}.`
           : `✅ Эквити: ${formula(sp, hit)} ${note} — засчитано (с оверкартами).`, hit === sp.correctOuts ? [] : [`Без оверкарт: ${formula(sp, sp.correctOuts)}.`]);
       }
-      const own = num(answers.outs);
-      if (Number.isFinite(own) && Math.abs(x - rule(own)) <= 3) {
-        return fb('equity', 'acceptable', `⚠️ Эквити: метод верный (${formula(sp, own)}), но ауты посчитаны неверно.`, [`Правильно: ${formula(sp, sp.correctOuts)} ${note}.`]);
+      const own = num(answers.outs), ownOk = Number.isFinite(own) && sp.acceptedOuts.some((a) => Math.abs(own - a) <= 1);
+      if (Number.isFinite(own) && Math.abs(x - rule(own)) <= 1) { // the formula was applied right to the player's own count
+        return fb('equity', 'acceptable', ownOk ? `⚠️ Эквити: по твоим ${outsW(own)} формула верна (${formula(sp, own)}), но точно аутов ${sp.correctOuts}.`
+          : `⚠️ Эквити: метод верный (${formula(sp, own)}), но ауты посчитаны неверно.`, [`Правильно: ${formula(sp, sp.correctOuts)} ${note}.`]);
       }
-      return fb('equity', M, `❌ Эквити: ${said(x + '%')}, правильно ${sp.ruleEq}%.`,
+      if (Number.isFinite(own) && sp.cardsToSee === 2 && own > 8 && Math.abs(x - own * 4) <= 1) { // ×4 without the 9+ correction
+        return fb('equity', M, `❌ Эквити: ${said(xs + '%')} — это ${numRu(own)} × 4 без поправки.`,
+          [`При 9+ аутах вычти (ауты − 8): ${formula(sp, own)}. Правильно: ${formula(sp, sp.correctOuts)} ${note}.`]);
+      }
+      return fb('equity', M, `❌ Эквити: ${said(xs + '%')}, правильно ${sp.ruleEq}%.`,
         [`${formula(sp, sp.correctOuts)} ${note}.`, 'Правило 2 и 4: одна карта — ауты × 2, две карты (олл-ин на флопе) — ауты × 4, а при 9+ аутах вычти (ауты − 8).']);
     }
     if (qid === 'potodds') {
       const n = Math.round(sp.needed); // ±2 around the exact value or the rounded one the player is shown
       return Math.min(Math.abs(x - sp.needed), Math.abs(x - n)) <= 2 ? fb('potodds', 'correct', `✅ Шансы банка: ${n}% — верно.`, potLines(sp))
-        : fb('potodds', M, `❌ Шансы банка: ${said(x + '%')}, правильно ${n}%.`, potLines(sp));
+        : fb('potodds', M, `❌ Шансы банка: ${said(xs + '%')}, правильно ${n}%.`, potLines(sp));
     }
     return null;
   }
@@ -2863,6 +3017,8 @@ const Coach = (() => {
     high: ['сбрасывает часто', 'часто сбрасывает на агрессию'], medium: ['сбрасывает иногда', 'иногда сбрасывает на агрессию'],
     low: ['сбрасывает редко', 'редко сбрасывает на агрессию'], none: ['почти никогда не сбрасывает', 'почти никогда не сбрасывает'],
   };
+  const fem = (name) => /[ая]$/.test(String(name).split(' ')[0]);
+  const him = (sp) => (sp.multiway && !sp.facing && fem(sp.villain.name) ? 'неё' : 'него'); // who() names the player only there
   const who = (sp) => {
     const v = sp.villain, fe = FE_RU[sp.villainFE];
     if (sp.multiway && !sp.facing) return `Самый цепкий из соперников, ${v.name}${v.revealed ? ` («${v.styleName}»), ${fe[0]}` : `, ${fe[1]}`}`; // no bettor to point at
@@ -2887,14 +3043,21 @@ const Coach = (() => {
           L.push(o < 8 ? `У тебя всего ${outsW(o)} — ставка-полублеф допустима, но проще взять бесплатную карту.`
             : sp.foldEq === 'none' ? `${who(sp)}, так что блефовать бессмысленно. Но у тебя ${outsW(o)}: ставка допустима — такое дро часто выигрывает и само. Бесплатная карта тоже хороша.`
             : `${who(sp)} — ставка-полублеф допустима, но бесплатная карта надёжнее.`);
-        } else if (v.raise === M) L.push(`${who(sp)} — полублеф против него не сработает, бери бесплатную карту.`);
+        } else if (v.raise === M) {
+          L.push(`${who(sp)} — полублеф против ${him(sp)} не сработает. У тебя ${outsW(o)} — около ${E}% попасть на следующей карте: ` +
+            (o < 8 ? 'слишком мало, чтобы ставить без шанса, что соперник сбросит.' : 'без сбросов соперника ставка только раздувает банк, а промахиваешься ты чаще.') + ' Бери бесплатную карту.');
+        }
         if (t === 'fold') L.push('Никогда не сбрасывай, когда можно бесплатно чекнуть.');
         return L;
       }
       if (showdownCall(sp)) {
         L.push(`По аутам ${E}% < ${showNeed(sp)} — как дро колл невыгоден.`);
-        L.push(`Но у тебя уже есть готовая рука (${lowerFirst(sp.made.name)}): против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${pctR(sp.estEq * 100)} эквити — колл окупается.`);
+        L.push(`Но у тебя уже есть готовая рука (${sp.made.ru}): против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${pctR(sp.estEq * 100)} эквити — колл окупается.`);
       } else L.push(`${E}% ${E >= N ? '≥' : '<'} ${showNeed(sp)} — колл ${E >= N ? 'окупается в долгую' : 'в долгую невыгоден'}.`);
+      if (overCall(sp)) {
+        const all = o + sp.outs.over;
+        L.push(`С оверкартами (${outsW(all)}) — ${ruleOf(sp)(all)}% ≥ ${showNeed(sp)}: колл тоже допустим, но пара из оверкарты может и не выиграть, а без них у тебя только ${E}%.`);
+      }
       if (!o && sp.kind === 'nodraw') L.push('У тебя нет ни готовой руки, ни дро — платить не за что.');
       if (o >= 12 && v.raise === B) {
         const eqTo = sp.street === 'flop' ? `около ${o * 4 - (o - 8)}% до ривера` : `около ${o * 2}% на ривере`;
@@ -2903,15 +3066,15 @@ const Coach = (() => {
         const fe = sp.foldEq;
         if (fe === 'high' || fe === 'medium') L.push(`${who(sp)}, поэтому рейз как полублеф ${E < N ? 'тоже был бы разумным вариантом' : 'тоже допустим'}.`);
         else if (fe === 'low') L.push(`${who(sp)} — рейз-полублеф ${E < N ? 'допустим, но сбросить надёжнее' : 'здесь не лучший вариант'}.`);
-        else L.push(`${who(sp)} — полублеф против него не сработает.`);
+        else L.push(`${who(sp)} — полублеф против ${him(sp)} не сработает.`);
         if (sp.multiway) L.push('Соперников несколько — шанс, что сбросят все, ниже.');
       } else if (t === 'raise' && o < 8) {
         L.push(`Рейз как полублеф имеет смысл только с сильным дро (8+ аутов) против соперника, который умеет сбрасывать${o ? `, а у тебя ${outsW(o)}` : ''}.`);
       }
       return L;
     }
-    const m = sp.made, tag = ['сет', 'трипс', 'оверпара', 'топ-пара', 'слабая пара', 'играет борд'].includes(m.label) ? ` (${m.label})` : '';
-    L.push(`Твоя рука: ${lowerFirst(m.name)}${tag}.`);
+    const m = sp.made, tag = !/общая/.test(m.ru) && ['сет', 'трипс', 'оверпара', 'топ-пара', 'слабая пара', 'играет борд'].includes(m.label) ? ` (${m.label})` : '';
+    L.push(`Твоя рука: ${m.ru}${tag}.`);
     if (sp.bigLate && m.strength !== 'strong') {
       const end = m.strength === 'none' ? 'Твои карты не дали даже пары — сброс.' : 'С одной парой — сброс.';
       L.push(sp.villain.revealed ? `Соперник «${sp.villain.styleName}»: крупный рейз на поздней улице от такого соперника — почти всегда натс. ${end}`
@@ -2920,9 +3083,22 @@ const Coach = (() => {
     }
     const eq = sp.estEq * 100, ok = eq >= N, close = isClose(sp);
     const p = (x) => (close ? U.pctNum(x, 1) : pctR(x));
-    L.push(`Против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${p(eq)} эквити — нужно ${p(N)}. ` +
-      (close ? `Это почти на грани: ${ok ? 'колл чуть выгоднее, сброс тоже допустим' : 'сброс чуть выгоднее, колл тоже допустим'}.` : ok ? 'Колл окупается.' : 'Колл невыгоден — сбрасывай.'));
+    if (m.strength === 'none') {
+      L.push(`Против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${pctR(eq)} эквити — нужно ${pctR(N)}.`);
+      L.push(v.call === OK ? `Без своей пары колл — это ловля блефа: ${sp.villain.revealed ? `соперник «${sp.villain.styleName}» часто блефует` : 'ставка небольшая'}, поэтому колл допустим, но сброс надёжнее.`
+        : 'Без своей пары колл — это ловля блефа: против крупной ставки сброс надёжнее, ошибкой он не будет никогда.');
+    } else {
+      L.push(`Против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${p(eq)} эквити — нужно ${p(N)}. ` +
+        (close ? `Это почти на грани: ${ok ? 'колл чуть выгоднее, сброс тоже допустим' : 'сброс чуть выгоднее, колл тоже допустим'}.` : ok ? 'Колл окупается.' : 'Колл невыгоден — сбрасывай.'));
+      if (ok && !close && v.fold === OK) L.push('Сброс тоже допустим: со слабой парой против крупной ставки соперника, о котором ты мало знаешь, легко оказаться позади.');
+    }
+    if (sp.drawToo) L.push(`По правилу 2 и 4 одни улучшения (${outsW(o)}) дают ${E}%, но ты и так часто впереди: оценка вместе с готовой рукой — ${pctR(eq)}. Решение принимаем по ней.`);
     if (v.raise === B || v.raise === OK) L.push('Рука сильная — повысить за ценностью тоже хорошо.');
+    else if (t === 'raise' && ok) {
+      const bar = raiseBar(sp), fair = 100 / (sp.nOpp + 1);
+      L.push(`Рейз за ценностью нужен, когда ты заметно впереди: ${sp.multiway ? `против ${U.nplural(sp.nOpp, 'соперника', 'соперников', 'соперников')} честная доля — ${pctR(fair)}, ` : ''}` +
+        `рейз окупается примерно от ${pctR(bar.ok * 100)}, а у тебя ${pctR(eq)}. На рейз заплатят в основном руки сильнее твоей, а слабые сбросят — колл выгоднее.`);
+    } else if (t === 'raise') L.push('Рейз с рукой, которой не хватает даже на колл, только теряет фишки.');
     return L;
   }
 
@@ -2949,7 +3125,7 @@ const Coach = (() => {
     if (!spot.opps.every((o) => hand.hole[o.seat])) return null;
     const opp = spot.opps.map((o) => hand.hole[o.seat]), hands = [spot.hole, ...opp];
     const real = Equity.calc(hands, spot.board, { toCome: spot.cardsToSee }).eq[0] * 100, rule = spot.ruleEq;
-    const vs = spot.opps.map((o, i) => `${cardsTight(opp[i])} (${o.name})`).join(' и ');
+    const vs = joinRu(spot.opps.map((o, i) => `${cardsTight(opp[i])} (${o.name})`)), many = opp.length > 1;
     const d = real - rule;
     let why;
     const sc = (h, c = []) => HandEval.score([...h, ...spot.board, ...c]);
@@ -2961,18 +3137,30 @@ const Coach = (() => {
       why = extra.length ? `Реально больше: против этих рук выигрывают и карты, которые не вошли в подсчёт: ${extra.map(Cards.str).join(', ')}.`
         : 'Реально больше: против этих рук выигрывают и карты, которые не вошли в подсчёт аутов.';
     } else {
-      const parts = [];
+      const parts = [], rival = many ? 'соперников' : 'соперника', strs = (cs) => cs.map(Cards.str).join(', ');
       if (spot.cardsToSee === 1) {
         const held = new Set(opp.flat()), mine = spot.multiway ? spot.outs.cleanList : spot.outs.list;
-        const blocked = mine.filter((c) => held.has(c));
-        const lost = mine.filter((c) => !held.has(c) && HandEval.score([...spot.hole, ...spot.board, c]) < Math.max(...opp.map((h) => HandEval.score([...h, ...spot.board, c]))));
-        if (blocked.length) parts.push(`${blocked.map(Cards.str).join(', ')} — у соперника на руках`);
-        if (lost.length) parts.push(`${lost.map(Cards.str).join(', ')} не спасают: у соперника всё равно рука сильнее`);
+        const nowBest = Math.max(...opp.map((h) => sc(h))), bestWith = (c) => Math.max(...opp.map((h) => sc(h, [c])));
+        const blocked = [], ahead = [], split = [], lost = [];
+        for (const c of mine) {
+          if (held.has(c)) { blocked.push(c); continue; }
+          const me = sc(spot.hole, [c]), them = bestWith(c);
+          if (me > them) continue;
+          (me === them ? split : nowBest >= me ? ahead : lost).push(c);
+        }
+        if (blocked.length) parts.push(`${strs(blocked)} — у ${rival} на руках`);
+        if (ahead.length || split.length) {
+          const made = lowerFirst(HandEval.describe(nowBest));
+          parts.push(`у ${many ? 'одного из соперников' : 'соперника'} уже ${made}` +
+            (ahead.length ? ` — с ${strs(ahead)} ты всё равно проигрываешь` : '') + (split.length ? `${ahead.length ? ', а' : ' —'} с ${strs(split)} только делишь банк` : ''));
+        }
+        if (lost.length) parts.push(`${strs(lost)} не ${lost.length > 1 ? 'спасают' : 'спасает'}: с ${lost.length > 1 ? 'ними' : 'ней'} у ${many ? 'кого-то из соперников' : 'соперника'} рука становится сильнее твоей`);
       }
       why = parts.length ? `Реально меньше: часть аутов не работает (${parts.join('; ')}).`
+        : many ? 'Реально меньше: кто-то из соперников уже впереди, и часть твоих аутов не помогает против их рук.'
         : 'Реально меньше: соперник уже впереди, и часть твоих аутов не помогает против его руки.';
     }
-    return { kind: 'realEquity', verdict: 'info', ok: true, title: `ℹ️ По правилу: ${rule}%. Реально против ${vs}: ${U.pctNum(real, 1)}.`, lines: [why] };
+    return { kind: 'realEquity', verdict: 'info', ok: true, title: `ℹ️ ${cap(STREET_RU[spot.street] || 'флоп')}: по правилу ${rule}%. Реально против ${vs}: ${U.pctNum(real, 1)}.`, lines: [why] };
   }
 
   // ---------- reading the opponent (SPEC 9.3) ----------
@@ -2987,13 +3175,28 @@ const Coach = (() => {
     if (!p || p.isHuman || !hand.hole[e.seat]) return null;
     const sizeFrac = e.potBefore > 0 ? e.add / e.potBefore : 1;
     if (sizeFrac < 0.66) return null;
-    return { bettor: e.seat, truth: classify(hand.hole[e.seat], hand.board), sizeFrac, street: hand.street,
+    const { truth, alt } = readTruth(hand.hole[e.seat], hand.board);
+    return { bettor: e.seat, truth, alt, sizeFrac, street: hand.street,
       board: hand.board.slice(), allIn: !!e.allIn, entry: e.i, options: READ_OPTIONS };
   }
+  // The read is graded in the coach's own vocabulary (madeInfo / computeOuts), not by the bots' betting classes:
+  // set, two pair with hole cards, straight+ = strong; top pair / overpair = medium; any draw = draw; else bluff.
+  // `alt` is the neighbouring answer that is accepted as ⚠️.
+  function readTruth(hole, board) {
+    const m = madeInfo(hole, board);
+    const draw = board.length < 5 && computeOuts(hole, board).draws.some((d) => DRAW_RU[d.type]);
+    if (m.strength === 'strong' || m.strength === 'medium') return { truth: m.strength, alt: m.strength === 'medium' && draw ? 'draw' : null };
+    if (draw) return { truth: 'draw', alt: null };
+    return { truth: 'bluff', alt: m.strength === 'weak' ? 'medium' : null };
+  }
+  const ALT_RU = {
+    bluff: 'Слабая пара против крупной ставки — по сути блеф: так ставят, чтобы выбить руки лучше. «Средняя» — близко.',
+    draw: 'Здесь и готовая пара, и дро — главное всё же пара, но «дро» — близко.',
+  };
 
   function holdingRu(hole, board) {
     const m = madeInfo(hole, board), r = R(hole[0]);
-    let s = m.label === 'сет' ? 'сет ' + GP(r) : m.strength === 'none' && m.cat > CAT.HIGH ? `ничего, ${lowerFirst(m.name)} только на борде` : lowerFirst(m.name);
+    let s = m.label === 'сет' ? 'сет ' + GP(r) : m.strength === 'none' && m.cat > CAT.HIGH ? `ничего, ${lowerFirst(m.name)} только на борде` : m.ru;
     if (board.length < 5) {
       const d = computeOuts(hole, board).draws.find((x) => DRAW_RU[x.type]);
       if (d) s += ' + ' + DRAW_RU[d.type];
@@ -3027,28 +3230,32 @@ const Coach = (() => {
       return `${p.name} — «${styleName(p)}»${st && st.type ? ` (${st.type})` : ''}.${st && st.desc ? ' Такой игрок ' + lowerFirst(st.desc.split('. ')[0].replace(/\.$/, '')) + '.' : ''}`;
     }
     const h = p.hud || { hands: 0, vpip: 0, pfr: 0 };
-    if (h.hands < 8) return `Статистики у ${gen(p.name)} пока мало (${U.nplural(h.hands, 'раздача', 'раздачи', 'раздач')}) — опирайся на остальные признаки.`;
-    const vpip = h.vpip / h.hands, pfr = h.pfr / h.hands, loose = vpip >= 0.3, aggr = pfr >= vpip * 0.5;
+    if (h.hands < 12) return `Статистики у ${gen(p.name)} пока мало (${U.nplural(h.hands, 'раздача', 'раздачи', 'раздач')}) — опирайся на остальные признаки.`;
+    // absolute PFR bars from the SPEC style table (rock 8, reg 15–18, station 5, maniac 30): a ratio cannot tell a rock from a reg
+    const vpip = h.vpip / h.hands, pfr = h.pfr / h.hands, loose = vpip >= 0.3, aggr = pfr >= (loose ? 0.18 : 0.12);
     const desc = loose ? (aggr ? 'лузовый агрессивный игрок: часто ставит крупно с чем угодно' : 'лузовый пассивный игрок: играет много рук, но крупно ставит в основном с силой')
       : aggr ? 'тайтовый агрессивный игрок: ставит и с сильными руками, и с дро, иногда блефует' : 'тайтовый пассивный игрок: крупно ставит почти только с сильной рукой';
-    return `${p.name} играет ${pctR(vpip * 100)} раздач и повышает префлоп в ${pctR(pfr * 100)} раздач — похоже, это ${desc}.`;
+    return `${p.name} играет ${pctR(vpip * 100)} раздач и повышает префлоп в ${pctR(pfr * 100)} раздач — по первым ${h.hands} раздачам похоже, это ${desc}.`;
   }
 
   function readReview(read, answer, hand, table, extras = {}) {
     if (!read || !hand || !table) return null;
     const p = table.players[read.bettor], hole = hand.hole[read.bettor];
     if (!p || !hole) return null;
-    const ok = answer === read.truth, lab = (READ_OPTIONS.find((o) => o.v === answer) || {}).label;
+    const ok = answer === read.truth, near = !ok && !!read.alt && answer === read.alt, lab = (READ_OPTIONS.find((o) => o.v === answer) || {}).label;
     const lines = ['Признаки:', playerTypeRu(p)];
     const pos = hand.pos[read.bettor];
     if (pos) {
       lines.push(`Позиция: ${pos}${['CO', 'BTN'].includes(pos) ? ' — из поздней позиции чаще ставят широким диапазоном, в том числе блефуют.'
         : ['UTG', 'UTG+1'].includes(pos) ? ' — из ранней позиции обычно играют сильные руки.'
-        : ['MP', 'LJ', 'HJ'].includes(pos) ? ' — из средней позиции играют чуть шире, чем из ранней, но всё ещё довольно сильные руки.' : '.'}`);
+        : ['MP', 'LJ', 'HJ'].includes(pos) ? ' — из средней позиции играют чуть шире, чем из ранней, но всё ещё довольно сильные руки.'
+        : ['SB', 'BB'].includes(pos) ? ' — с блайнда в игру входят очень разными руками, позиция здесь мало что подсказывает.' : '.'}`);
     }
     const pre = preflopRu(hand, read.bettor);
     if (pre) lines.push(pre);
-    lines.push(`Размер ставки: ${pctR(read.sizeFrac * 100)} банка${read.allIn ? ' (олл-ин)' : ''} — крупно: так ставят с очень сильной рукой или с блефом, средние руки обычно ставят меньше.`);
+    const k = read.sizeFrac < 10 ? Math.round(read.sizeFrac * 10) / 10 : Math.round(read.sizeFrac);
+    const size = read.sizeFrac >= 2 ? `в ${U.dec(k, 1)} ${k % 1 ? 'раза' : U.plural(k, 'раз', 'раза', 'раз')} больше банка` : `${pctR(read.sizeFrac * 100)} банка`;
+    lines.push(`Размер ставки: ${size}${read.allIn ? ' (олл-ин)' : ''} — крупно: так ставят с очень сильной рукой или с блефом, средние руки обычно ставят меньше.`);
     const ms = extras.thinkMs;
     if (Number.isFinite(ms)) {
       const s = U.dec(ms / 1000, 1);
@@ -3059,9 +3266,15 @@ const Coach = (() => {
     if (Array.isArray(extras.tellsSeen)) {
       const seen = extras.tellsSeen.filter((r) => r && r.seat === read.bettor);
       if (!seen.length) lines.push(`Теллов у ${gen(p.name)} ты не видел.`);
-      for (const r of seen) lines.push(`Телл: ${p.name} ${r.text}${r.meaning ? ` — ${r.meaning}` : ''}${r.acting ? ' (на деле это был спектакль: показанное было обратным)' : ''}.`);
+      for (const r of seen) {
+        lines.push(`Телл: ${p.name} ${r.text}${r.meaning ? ` — ${r.meaning}` : ''}${r.acting ? ' (на деле это был спектакль: показанное было обратным)'
+          : r.random ? ' (на деле эта реакция была случайной — теллы надёжны не на 100%)' : ''}.`);
+      }
+      if (seen.length && seen.every((r) => r.random)) lines.push(`Реакции ${gen(p.name)} не совпадали с картами — на теллы этого игрока лучше не опираться.`);
     }
     lines.push(`На самом деле у ${gen(p.name)}: ${cardsTight(hole)} — ${holdingRu(hole, read.board || hand.board)} (${TRUTH_RU[read.truth]}).`);
+    if (near) lines.push(ALT_RU[read.truth]);
+    if (near) return fb('read', 'acceptable', `⚠️ Чтение соперника: «${lab}» — близко, точнее — ${TRUTH_RU[read.truth]}.`, lines);
     const title = ok ? `✅ Чтение соперника: верно — ${TRUTH_RU[read.truth]}.`
       : lab ? `❌ Чтение соперника: ты выбрал «${lab}», а на самом деле — ${TRUTH_RU[read.truth]}.` : `❌ Чтение соперника: на самом деле — ${TRUTH_RU[read.truth]}.`;
     return fb('read', ok ? 'correct' : M, title, lines);
@@ -3075,7 +3288,7 @@ const Coach = (() => {
     const st = STREET_RU[street] || 'флоп';
     const meaning = String(r.meaning || '').replace(/флоп/g, st);
     return fb('tells', M, `❌ Теллы: ты смотрел на борд, когда открывался ${st}.`,
-      [`Ты смотрел на борд. В этот момент ${table.players[r.seat].name} ${r.text}${meaning ? ` — ${meaning}` : ''}. Смотри на соперников, борд никуда не денется.`]);
+      [`Пока ты смотрел на борд, ты пропустил реакцию: ${table.players[r.seat].name} ${r.text}${meaning ? ` — ${meaning}` : ''}. Смотри на соперников, борд никуда не денется.`]);
   }
 
   // ---------- the player's own timing (SPEC 9.4) ----------
@@ -3170,7 +3383,11 @@ const View = (() => {
     setTimeout(() => t.remove(), ms);
   }
 
-  return { cardHTML, cardsHTML, suitText, feedbackHTML, el, modal, toast };
+  function clearToasts() {
+    if (typeof document !== 'undefined') document.querySelectorAll('.toast-wrap .toast').forEach((t) => t.remove());
+  }
+
+  return { cardHTML, cardsHTML, suitText, feedbackHTML, el, modal, toast, clearToasts };
 })();
 
 // ===== 72-settings.js =====
@@ -3314,7 +3531,7 @@ const UI = (() => {
   let act = null, nextRes = null, keysBound = false, popSeat = null, tipFor = null;
   const MODE_RU = { learn: 'Обучение', practice: 'Тренировка', tournament: 'Турнир' };
   const STREET_RU = { preflop: 'Префлоп', flop: 'Флоп', turn: 'Тёрн', river: 'Ривер' };
-  const QUICK = [['1/3', 1 / 3], ['1/2', 0.5], ['2/3', 2 / 3], ['Банк', 1], ['Олл-ин', 'all']];
+  const QUICK = ['1/3', '1/2', '2/3', 'Банк', 'Олл-ин'];
   const $ = (sel, el = root) => el.querySelector(sel);
   const $$ = (sel, el = root) => [...el.querySelectorAll(sel)];
   const put = (el, html) => { if (el && el._h !== html) { el._h = html; el.innerHTML = html; } };
@@ -3364,7 +3581,7 @@ const UI = (() => {
           <div class="look-bar"><i></i></div>
         </div>
         <div class="pop hidden"></div>
-        <div class="veil hidden">Пауза</div>
+        <div class="veil hidden"><span>Пауза</span></div>
       </div></div>
       <div class="dock idle"><div class="dock-in">
         <div class="d-aux">
@@ -3372,10 +3589,10 @@ const UI = (() => {
           <button class="btn btn-sm d-range" data-cmd="range" title="Посмотреть диапазон">${IC.grid}<span class="lbl">Посмотреть диапазон</span></button>
           <div class="d-msg"></div>
         </div>
-        <div class="quick">${QUICK.map(([l, f]) => `<button class="btn btn-sm" data-q="${f}">${l}</button>`).join('')}</div>
+        <div class="quick">${QUICK.map((l, k) => `<button class="btn btn-sm" data-q="${k}" aria-pressed="false">${l}</button>`).join('')}</div>
         <div class="slide"><input type="range" class="amt-r" aria-label="Размер ставки"><input type="number" class="amt-n" inputmode="numeric" aria-label="Сумма ставки"></div>
         <div class="d-main">
-          <button class="btn act act-fold" data-act="fold">Сброс<kbd>F</kbd></button>
+          <button class="btn act act-fold" data-act="fold"><span>Сброс</span><kbd>F</kbd></button>
           <button class="btn act act-call" data-act="call"><span>Чек</span><kbd>C</kbd></button>
           <button class="btn btn-primary act act-raise" data-act="raise"><span>Рейз</span><kbd>R</kbd></button>
         </div>
@@ -3427,7 +3644,12 @@ const UI = (() => {
     if (!keysBound) {
       keysBound = true;
       document.addEventListener('keydown', onKey);
-      window.addEventListener('resize', () => { hidePop(); hideTip(); });
+      window.addEventListener('resize', () => {
+        hidePop(); hideTip();
+        if (root && root.isConnected) renderDealer();
+        const f = document.activeElement;
+        if (f && f.closest && f.closest('.c-q')) f.scrollIntoView({ block: 'nearest' });
+      });
     }
     setupSeats();
     render();
@@ -3435,6 +3657,7 @@ const UI = (() => {
 
   function setupSeats() {
     const n = S.table.players.length;
+    tableEl.className = 'ptable n' + n;
     put($('.seats'), ''); put($('.bets'), '');
     seatEls = []; betEls = []; prevBets = [];
     S.table.players.forEach((p, i) => {
@@ -3445,7 +3668,7 @@ const UI = (() => {
         <div class="s-cards"></div>
         <div class="plate"><div class="av" style="--avc:${esc(av.color)}">${esc(av.initials)}</div><div class="s-info"></div><span class="posb"></span></div>
         <div class="s-status"></div><div class="bubble"></div></div>`);
-      const bet = View.el(`<div class="bet hidden${i === 0 ? ' me' : ''}" style="--x:${x.toFixed(4)};--y:${y.toFixed(4)}"></div>`);
+      const bet = View.el(`<div class="bet hidden${i === 0 ? ' me' : ''}${side}" style="--x:${x.toFixed(4)};--y:${y.toFixed(4)}"></div>`);
       $('.seats').appendChild(seat); $('.bets').appendChild(bet);
       seatEls.push(seat); betEls.push(bet); prevBets.push(0);
     });
@@ -3465,11 +3688,14 @@ const UI = (() => {
 
   function renderHead() {
     const t = S.table, h = S.hand;
-    let html = h ? `<span><i class="k">Раздача </i><b>№${h.no}</b></span>` : '';
-    html += `<span><i class="k">Блайнды </i><b>${fmt(t.sb)}/${fmt(t.bb)}</b></span>`;
+    const no = h ? `<span class="hno"><i class="k">Раздача </i><b>№${h.no}</b></span>` : '';
+    let html = `<span><i class="k">Блайнды </i><b>${fmt(t.sb)}/${fmt(t.bb)}</b></span>`;
     const L = S.mode === 'tournament' && S.levelInfo;
-    if (L) html += `<span>Уровень <b>${L.level}</b></span>` + (L.left ? `<span><i class="k">До повышения </i><b>${U.nplural(L.left, 'раздача', 'раздачи', 'раздач')}</b></span>` : '');
-    put($('.hinfo'), html);
+    // Tournament: level and the countdown come before the hand number, so a narrow header cuts the number first.
+    if (L) html += `<span><i class="k">Уровень </i><i class="ks">Ур. </i><b>${L.level}</b></span>` +
+      (L.left ? `<span title="Блайнды вырастут через ${U.nplural(L.left, 'раздачу', 'раздачи', 'раздач')}">↑ через <b>${L.left}</b><i class="k"> ${U.plural(L.left, 'раздачу', 'раздачи', 'раздач')}</i></span>` : '');
+    put($('.hinfo'), L ? html + no : no + html);
+    tog(root, 'paused', S.paused);
     const pb = $('[data-cmd="pause"]');
     put(pb, (S.paused ? IC.play : IC.pause) + `<span class="lbl">${S.paused ? 'Продолжить' : 'Пауза'}</span>`);
     pb.title = S.paused ? 'Продолжить' : 'Пауза';
@@ -3541,7 +3767,10 @@ const UI = (() => {
   function sidePots(h) {
     // Display-only split of committed chips into main/side pots by all-in levels.
     const seats = h.seats || h.committed.map((_, i) => i);
-    const paid = (s) => h.committed[s] - (h.returned ? h.returned[s] : 0);
+    const raw = (s) => h.committed[s] - (h.returned ? h.returned[s] : 0);
+    // Chips above the second-largest contribution are uncalled (Engine returns them): never a «Побочный».
+    const cap = h.committed.map((_, s) => raw(s)).sort((a, b) => b - a)[1] || 0;
+    const paid = (s) => Math.min(raw(s), cap);
     const levels = [...new Set(seats.filter((s) => h.allIn[s] && !h.folded[s]).map(paid))].sort((a, b) => a - b);
     const pots = [];
     let prev = 0;
@@ -3602,8 +3831,13 @@ const UI = (() => {
     const a = (90 + (btn * 360) / n) * Math.PI / 180;
     d.style.setProperty('--x', Math.cos(a).toFixed(4));
     d.style.setProperty('--y', Math.sin(a).toFixed(4));
-    if (btn === 0) { d.style.setProperty('--f', '0.62'); d.style.setProperty('--toff', '-110px'); }
-    else { d.style.removeProperty('--f'); d.style.removeProperty('--toff'); }
+    // The hero's seat is pinned to the bottom edge, off the oval: put the disc just left of the hero's plate.
+    const plate = btn === 0 && seatEls[0] && $('.plate', seatEls[0]);
+    if (plate && plate.offsetWidth) {
+      const pr = plate.getBoundingClientRect(), tr = tableEl.getBoundingClientRect();
+      d.style.left = (pr.left - tr.left - d.offsetWidth / 2 - 6).toFixed(1) + 'px';
+      d.style.top = (pr.top - tr.top + pr.height / 2).toFixed(1) + 'px';
+    } else { d.style.left = ''; d.style.top = ''; }
   }
 
   // ---------- action dock ----------
@@ -3611,15 +3845,17 @@ const UI = (() => {
 
   function renderDock() {
     if (!dock) return;
-    const L = act && act.legal;
+    const L = act && act.legal, off = !L || S.paused; // paused: the dock is inert
     tog(dock, 'idle', !L);
     tog(dock, 'next', !!nextRes);
     const [fold, call, raise] = $$('.d-main .btn', dock);
-    fold.disabled = !L; call.disabled = !L;
-    raise.disabled = !L || !L.canRaise;
-    $$('.quick .btn, .slide input', dock).forEach((b) => { b.disabled = !L || !L.canRaise; });
-    put($('span', call), !L ? 'Чек / колл' : L.canCheck ? 'Чек' : L.toCall >= L.stack ? `Олл-ин ${fmt(L.toCall)}` : `Колл ${fmt(L.toCall)}`);
-    put($('span', raise), !L ? 'Ставка / рейз' : L.canRaise ? raiseLabel(L, amount()) : 'Рейз');
+    fold.disabled = off; call.disabled = off;
+    raise.disabled = off || !L.canRaise;
+    $$('.quick .btn, .slide input', dock).forEach((b) => { b.disabled = off || !L.canRaise; });
+    $('.d-next .btn', dock).disabled = !!S.paused;
+    put($('span', fold), act && act.foldArmed ? 'Точно сбросить?' : 'Сброс');
+    put($('span', call), !L ? 'Колл' : L.canCheck ? 'Чек' : L.toCall >= L.stack ? `Олл-ин ${fmt(L.toCall)}` : `Колл ${fmt(L.toCall)}`);
+    put($('span', raise), !L ? 'Рейз' : L.canRaise ? raiseLabel(L, amount()) : 'Рейз');
     $('.d-hint', dock).disabled = !(S.hint && S.mode === 'learn');
     $('.d-range', dock).disabled = !S.rangeKey;
     tog($('.d-next', dock), 'hidden', !nextRes);
@@ -3628,6 +3864,8 @@ const UI = (() => {
   }
 
   function dockMsg() {
+    if (S.paused) return 'Пауза — нажми «Продолжить».';
+    if (act && act.foldArmed) return 'Чек бесплатный. Нажми «Сброс» ещё раз, если всё же хочешь сбросить.';
     if (nextRes) return 'Раздача окончена.';
     if (act) return 'Твой ход.';
     if (S.asking) return 'Ответь на вопрос тренера.';
@@ -3646,33 +3884,68 @@ const UI = (() => {
     if (!L) return;
     v = U.clamp(Math.round(v), L.minTo, L.maxTo);
     const r = $('.amt-r', dock), n = $('.amt-n', dock);
-    r.min = n.min = L.minTo; r.max = n.max = L.maxTo; r.step = 1;
+    r.min = n.min = L.minTo; r.max = n.max = L.maxTo; r.step = 1; // the slider snaps through nice() in onInput
     r.value = n.value = v;
     put($('.act-raise span', dock), raiseLabel(L, v));
+    const on = act.sizes ? act.sizes.map((s) => s[1]).lastIndexOf(v) : -1; // sizes that collapse to one amount light one button
+    $$('.quick .btn', dock).forEach((b, k) => b.setAttribute('aria-pressed', String(k === on)));
   }
-  function defaultRaise(L) {
-    const h = S.hand;
-    if (h.street === 'preflop') return Math.max(L.minTo, Math.round(L.currentBet * 3));
-    return typeof Engine !== 'undefined' && Engine.sizeTo ? Engine.sizeTo(h, 0.66) : L.minTo;
+
+  // ---------- bet sizing: chip-friendly amounts, beginner-standard preflop sizes ----------
+  // Snap to ½ BB below 10 BB, 1 BB below 50 BB, 2½ BB above; within [minTo, maxTo]; near all-in → exact all-in.
+  function nice(v, L, bb) {
+    const st = v < 10 * bb ? bb / 2 : v < 50 * bb ? bb : 2.5 * bb;
+    let r = Math.round(v / st) * st;
+    if (L.maxTo - r < st) r = L.maxTo;
+    return U.clamp(r, L.minTo, L.maxTo);
   }
+  // Players who just called the big blind preflop (the hero excluded).
+  const limpers = (h) => h.seats.filter((s) => s !== 0 && s !== h.bbSeat && !h.folded[s] && h.bets[s] >= h.bb).length;
+  // [[label, raise-to] × 5]: preflop in big blinds (+1 BB per limper) or multiples of the raise; postflop pot fractions.
+  function quickSizes(h, L) {
+    const bb = h.bb, potTo = (f) => nice(Engine.sizeTo(h, f), L, bb), tail = [['Банк', potTo(1)], ['Олл-ин', L.maxTo]];
+    if (h.street !== 'preflop') return [['1/3', potTo(1 / 3)], ['1/2', potTo(0.5)], ['2/3', potTo(2 / 3)], ...tail];
+    const lim = limpers(h);
+    return [2.5, 3, 4].map((k) => (h.raises ? [`×${U.dec(k)}`, nice(k * L.currentBet, L, bb)] : [`${U.dec(k)} BB`, nice((k + lim) * bb, L, bb)])).concat(tail);
+  }
+  // Default raise-to: open 3 BB + 1 BB per limper; ×3 against a raise or a postflop bet; ⅔ pot as a postflop bet.
+  function defaultRaise(h, L) {
+    if (h.street === 'preflop') return h.raises ? nice(3 * L.currentBet, L, h.bb) : nice((3 + limpers(h)) * h.bb, L, h.bb);
+    return L.currentBet ? nice(3 * L.currentBet, L, h.bb) : nice(Engine.sizeTo(h, 2 / 3), L, h.bb);
+  }
+
+  // Runs fn once the game is not paused (autoplay must not act through the Pause veil either).
+  const whenRunning = (fn) => (S && S.paused ? setTimeout(() => whenRunning(fn), 100) : fn());
 
   function askAction(legal, auto) {
     return new Promise((resolve) => {
-      act = { legal, resolve };
-      if (legal.canRaise) setAmount(defaultRaise(legal));
+      // phones: the player decides looking at the table, not at the coach sheet; the dot says the last verdict waits there
+      if (!wide() && side.classList.contains('open')) { closeSheet(); $('.tab[data-tab="coach"]').classList.add('new'); }
+      act = { legal, resolve, sizes: legal.canRaise ? quickSizes(S.hand, legal) : null };
+      if (act.sizes) {
+        $$('.quick .btn', dock).forEach((b, k) => put(b, esc(act.sizes[k][0])));
+        setAmount(defaultRaise(S.hand, legal));
+      } else $$('.quick .btn', dock).forEach((b) => b.setAttribute('aria-pressed', 'false'));
       renderDock();
-      if (auto) setTimeout(() => {
+      if (auto) setTimeout(() => whenRunning(() => {
         if (!act || act.resolve !== resolve) return;
         if (auto.type === 'raise') setAmount(auto.to);
         doAct(auto.type === 'check' ? 'call' : auto.type);
-      }, 0);
+      }), 0);
     });
   }
 
   function doAct(type) {
-    if (!act) return;
+    if (!act || S.paused) return;
     const L = act.legal;
     let a;
+    // A free check is never folded by a single slip (learn and practice): the first press asks to confirm.
+    if (type === 'fold' && L.canCheck && S.mode !== 'tournament' && !act.foldArmed) {
+      const cur = act;
+      cur.foldArmed = true;
+      setTimeout(() => { if (act === cur) { cur.foldArmed = false; renderDock(); } }, 2500);
+      return renderDock();
+    }
     if (type === 'fold') a = { type: 'fold' };
     else if (type === 'call') a = { type: L.canCheck ? 'check' : 'call' };
     else if (type === 'raise' && L.canRaise) a = { type: 'raise', to: amount() };
@@ -3683,26 +3956,24 @@ const UI = (() => {
     r(a);
   }
 
-  function quick(f) {
-    const L = act && act.legal;
-    if (!L || !L.canRaise) return;
-    setAmount(f === 'all' ? L.maxTo : Engine.sizeTo(S.hand, +f));
+  function quick(k) {
+    if (!act || !act.sizes || S.paused) return;
+    setAmount(act.sizes[+k][1]);
   }
 
+  // One «next» control: the dock button (the coach column no longer repeats it).
   function waitNext(auto, label = 'Следующая раздача') {
     return new Promise((resolve) => {
       nextRes = resolve;
-      put($('.coach-foot'), `<button class="btn btn-primary" data-cmd="next">${esc(label)}</button>`);
       put($('.d-next .btn', dock), esc(label));
       renderDock();
-      if (auto) setTimeout(() => { if (nextRes === resolve) $('.d-next .btn', dock).click(); }, 0);
+      if (auto) setTimeout(() => whenRunning(() => { if (nextRes === resolve) resolveNext(); }), 0);
     });
   }
   function resolveNext() {
-    if (!nextRes) return;
+    if (!nextRes || S.paused) return;
     const r = nextRes;
     nextRes = null;
-    put($('.coach-foot'), '');
     renderDock();
     r();
   }
@@ -3722,6 +3993,7 @@ const UI = (() => {
     const tab = t.closest('.side-tabs [data-tab]');
     if (tab) return tabClick(tab.dataset.tab);
     const seat = t.closest('.seat');
+    if (seat && seat.dataset.seat === '0' && t.closest('.plate')) { const pb = $('.posb', seat); if (pb.dataset.tip) { if (tipFor === pb) hideTip(); else showTip(pb); } return; }
     if (seat && seat.dataset.seat !== '0') return popSeat === +seat.dataset.seat ? hidePop() : showPop(+seat.dataset.seat);
     if (!t.closest('.pop')) hidePop();
   }
@@ -3736,7 +4008,7 @@ const UI = (() => {
 
   function onInput(e) {
     const t = e.target;
-    if (t.classList.contains('amt-r')) setAmount(+t.value);
+    if (t.classList.contains('amt-r')) { if (act) setAmount(nice(+t.value, act.legal, S.hand.bb)); }
     else if (t.classList.contains('amt-n') && e.type === 'change') setAmount(amount());
     else if (t.classList.contains('amt-n')) {
       const L = act && act.legal, v = Math.round(+t.value);
@@ -3749,9 +4021,10 @@ const UI = (() => {
     if (document.querySelector('.modal-back')) return;
     if (e.key === 'Escape') { hidePop(); hideTip(); return; }
     const tag = e.target && e.target.tagName;
-    const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    const inField = (tag === 'INPUT' && e.target.type !== 'range') || tag === 'TEXTAREA' || tag === 'SELECT'; // the bet slider keeps F/C/R
     if (e.key === 'Enter') {
       if (e.target.classList && e.target.classList.contains('amt-n')) { e.preventDefault(); setAmount(amount()); doAct('raise'); return; }
+      if (e.target.classList && e.target.classList.contains('amt-r')) { e.preventDefault(); doAct('raise'); return; }
       if (inField || (tag === 'BUTTON' && !e.target.disabled)) return; // a focused button handles Enter itself
       if (nextRes) { e.preventDefault(); resolveNext(); }
       return;
@@ -3793,16 +4066,26 @@ const UI = (() => {
     flagNew(peek);
     return el;
   }
-  const coachFb = (fb) => coachAdd(View.feedbackHTML(fb), 'c-fb', `<span class="v-${fb.verdict || 'info'}">${View.suitText(fb.title || '')}</span>`);
+  // Narrow screens: a learn-mode mistake opens the sheet (the game waits while it is open — see held), so it is read, not missed.
+  function coachFb(fb) {
+    const el = coachAdd(View.feedbackHTML(fb), 'c-fb', `<span class="v-${fb.verdict || 'info'}">${View.suitText(fb.title || '')}</span>`);
+    if (S.mode === 'learn' && fb.verdict === 'mistake' && !wide()) openSheet('coach');
+    return el;
+  }
   function review(items) {
     coachAdd('<div class="c-sep">Разбор раздачи</div>' + items.map(View.feedbackHTML).join(''), 'c-review', 'Разбор раздачи готов');
+    if (!wide()) openSheet('coach');
   }
+  // The coach sheet covers the table on narrow screens: while it is open the game holds (Game.wait), like Pause.
+  const held = () => !!side && side.classList.contains('open') && !wide();
+  function holding(on) { tog(side, 'hold', on); }
 
   // q = { id, type: 'number'|'choice', prompt, unit, options, info, hint }; ctx = { n, of, hole, board, sub }
   function askQuestion(q, ctx, auto) {
     return new Promise((resolve) => {
       const opts = (q.options || []).map((o) => (o && typeof o === 'object' ? o : { v: o, label: String(o) }));
-      const info = q.info ? [['Банк со ставкой', q.info.pot], ['Ставка соперника', q.info.bet], ['Тебе доплатить', q.info.toCall]]
+      const short = (ctx && ctx.short) || (q.info && q.info.short); // short all-in call: only part of the pot can be won
+      const info = q.info ? [[short ? 'Банк, который ты можешь выиграть' : 'Банк со ставкой', q.info.pot], ['Ставка соперника', q.info.bet], ['Тебе доплатить', q.info.toCall]]
         .filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => `<span>${k}: <b>${fmt(v)}</b></span>`).join('') : '';
       const hand = ctx && ctx.hole ? `<div class="c-q-hand"><span>Твои карты ${View.cardsHTML(ctx.hole)}</span>${ctx.board && ctx.board.length ? `<span>Борд ${View.cardsHTML(ctx.board)}</span>` : ''}</div>` : '';
       const body = q.type === 'choice'
@@ -3814,6 +4097,7 @@ const UI = (() => {
       openSheet('coach');
       const input = $('input', el);
       const done = (value, label) => {
+        if (S.paused) return; // Pause means paused: answers wait too
         el.className = 'c-item c-ans';
         el.innerHTML = `${View.suitText(q.prompt)} — <b>${View.suitText(label)}</b>`;
         resolve(value);
@@ -3823,17 +4107,20 @@ const UI = (() => {
         e.preventDefault();
         const raw = input.value.trim().replace(',', '.').replace('%', '');
         const v = parseFloat(raw);
+        if (S.paused) return;
         if (!raw || !isFinite(v)) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); input.focus(); return; }
         const shown = input.value.trim().replace(/\s*%$/, '');
         done(v, shown + (q.unit === '%' ? '%' : q.unit ? ' ' + q.unit : ''));
       });
       $$('[data-o]', el).forEach((b) => b.addEventListener('click', () => { const o = opts[+b.dataset.o]; done(o.v, o.label); }));
       if (input && !mq('(pointer: coarse)')) setTimeout(() => input.focus({ preventScroll: true }), 30);
-      if (auto !== undefined && auto !== null) setTimeout(() => {
+      // the on-screen keyboard shrinks the sheet: keep the field in view
+      if (input) input.addEventListener('focus', () => setTimeout(() => { if (input.isConnected) input.scrollIntoView({ block: 'nearest' }); }, 300));
+      if (auto !== undefined && auto !== null) setTimeout(() => whenRunning(() => {
         if (!el.isConnected || !el.classList.contains('c-q')) return;
         if (form) { input.value = String(auto); form.requestSubmit(); }
         else { const k = opts.findIndex((o) => String(o.v) === String(auto)); ($(`[data-o="${Math.max(0, k)}"]`, el) || {}).click(); }
-      }, 0);
+      }), 0);
     });
   }
 
@@ -3855,8 +4142,7 @@ const UI = (() => {
     const b = $('.bubble', el);
     clearTimeout(el._bt);
     if (el._anim) el.classList.remove(el._anim);
-    b.textContent = r.bubble || r.text || '';
-    tog(b, 'acting', r.acting);
+    b.textContent = r.bubble || r.text || ''; // no styling from r.acting: noise copies must look the same
     b.classList.add('show');
     if (r.anim) { el._anim = 'a-' + r.anim; void el.offsetWidth; el.classList.add(el._anim); }
     el._bt = setTimeout(() => { b.classList.remove('show'); if (el._anim) el.classList.remove(el._anim); el._anim = null; }, Math.max(300, ms));
@@ -3874,7 +4160,7 @@ const UI = (() => {
         done = true; clearInterval(timer); el.classList.add('hidden'); el.onclick = null;
         resolve(v);
       };
-      el.onclick = (e) => { const b = e.target.closest('[data-look]'); if (b) finish(b.dataset.look); };
+      el.onclick = (e) => { const b = e.target.closest('[data-look]'); if (b && !S.paused) finish(b.dataset.look); };
       const timer = setInterval(() => {
         const t = U.now();
         if (!S.paused) left -= t - last;
@@ -3884,7 +4170,7 @@ const UI = (() => {
       }, 40);
       bar.style.transform = 'scaleX(1)';
       if (!mq('(pointer: coarse)')) $('[data-look="players"]', el).focus({ preventScroll: true });
-      if (auto) setTimeout(() => { if (!done) $(`[data-look="${auto}"]`, el).click(); }, 0);
+      if (auto) setTimeout(() => whenRunning(() => { if (!done) $(`[data-look="${auto}"]`, el).click(); }), 0);
     });
   }
 
@@ -3975,8 +4261,9 @@ const UI = (() => {
 
   return {
     mount, render, askAction, waitNext, askQuestion, askLook, coachClear, coachAdd, coachFb, review,
-    logReset, logStreet, logLine, bubble, collect, payout, deal, openSheet, closeSheet, setAmount,
-    get acting() { return !!act; }, get waitingNext() { return !!nextRes; },
+    logReset, logStreet, logLine, bubble, collect, payout, deal, openSheet, closeSheet, setAmount, holding,
+    sidePots, nice, quickSizes, defaultRaise,
+    get acting() { return !!act; }, get waitingNext() { return !!nextRes; }, get held() { return held(); },
   };
 })();
 
@@ -4040,6 +4327,7 @@ const Screens = (() => {
     ['read', 'Чтение соперника', 'Что у него, когда он ставит крупно'],
     ['tells', 'Теллы', 'Смотреть на борд или на соперников, когда открывается карта'],
   ];
+  const STYLE_COLS = ['VPIP', 'Рейз префлоп', 'Агрессия после флопа', 'Сброс на ставку', 'Блеф', 'Теллы'];
   const TABS = [['outs', 'Ауты'], ['rule', 'Правило 2 и 4'], ['odds', 'Шансы банка'], ['pos', 'Позиции'], ['types', 'Соперники']];
   const TAB_FOR = { preflop: 'pos', outs: 'outs', equity: 'rule', potodds: 'odds', action: 'odds', read: 'types' };
   const LEGEND = { raise: 'Рейз / 3-бет', in: 'Входит в диапазон', call: 'Колл', border: 'На границе: допустимо', out: 'Сброс' };
@@ -4062,6 +4350,7 @@ const Screens = (() => {
   // ---------- plumbing ----------
   function mount(html, acts) {
     const root = View.el(typo(html));
+    document.querySelectorAll('.toast-wrap .toast').forEach((t) => t.remove()); // game toasts must not cover the new screen
     document.getElementById('app').replaceChildren(root);
     window.scrollTo(0, 0);
     const h = root.querySelector('h1');
@@ -4091,6 +4380,7 @@ const Screens = (() => {
     };
     const summary = `Стол на ${U.nplural(s.players, 'игрока', 'игрока', 'игроков')}, стек ${s.startBB} BB.<br>` +
       (t.n ? `Верных ответов: ${pct(t)}% из ${t.n}.` : 'Точность появится после первых ответов.');
+    const primary = (id) => (id === 'learn' || t.n ? ' btn-primary' : ''); // first-timer: one call to action
     mount(`<main class="sc sc-menu">
       <section class="sc-rail"><div class="sc-felt">
         <div class="sc-fan" aria-hidden="true">${View.cardHTML(Cards.parse('As'))}${View.cardHTML(Cards.parse('Kh'))}</div>
@@ -4101,7 +4391,7 @@ const Screens = (() => {
       <section class="sc-modes">${MODES.map((m) => `<article class="panel sc-mode sc-mode-${m.id}">
         <header><span class="sc-chip" aria-hidden="true">${m.suit}</span><h2>${m.name}</h2></header>
         <p>${m.desc}</p><p class="sc-fact">${fact[m.id]}</p>
-        <button class="btn btn-primary" data-act="start" data-arg="${m.id}">${m.cta}</button></article>`).join('')}</section>
+        <button class="btn${primary(m.id)}" data-act="start" data-arg="${m.id}">${m.cta}</button></article>`).join('')}</section>
       <nav class="sc-nav" aria-label="Разделы"><button class="btn" data-act="settings">Настройки</button><button class="btn" data-act="stats">Статистика</button><button class="btn" data-act="cheat">Шпаргалка</button></nav>
       <section class="sc-how"><h2>Как играть</h2><ul>${HOW.map((h, i) => {
         const suit = '♠♥♦♣'[i];
@@ -4110,7 +4400,7 @@ const Screens = (() => {
     </main>`, {
       start: (mode) => opts.onStart && opts.onStart(mode),
       settings: () => settings({ onBack: () => menu(opts) }),
-      stats: () => stats({ onBack: () => menu(opts) }),
+      stats: () => stats({ onBack: () => menu(opts), onStart: opts.onStart }),
       cheat: () => cheatSheet(),
     });
   }
@@ -4205,12 +4495,29 @@ const Screens = (() => {
       v === null ? '<span class="sc-dim">—</span>' : `<span class="sc-meter"><i style="width:${v}%"></i></span>${v}%`, c.n];
   }), 2, 'sc-pos');
 
-  const mistakesHTML = (list) => (list.length ? `<ol class="sc-mlist">${list.map((m, i) => `<li><button class="sc-mrow" data-act="mistake" data-arg="${i}">
-      <span class="sc-mdate">${m.ts ? date(m.ts) : m.handNo != null ? 'Раздача ' + esc(m.handNo) : ''}</span><span class="sc-tag">${esc(Stats.CAT_RU[m.cat] || m.cat || 'Ошибка')}</span>
-      <span class="sc-mtitle">${txt(m.title || 'Ошибка')}</span></button></li>`).join('')}</ol>` : '<p class="sc-empty">Ошибок пока нет.</p>');
+  const catName = (c) => Stats.CAT_RU[c] || c || 'Ошибка';
+  // opts: byHand — «Раздача N» instead of the time; limit — rows shown before «Показать все»; empty — text for [].
+  function mistakesHTML(list, { byHand = false, limit = Infinity, empty = 'Ошибок пока нет.' } = {}) {
+    if (!list.length) return `<p class="sc-empty">${empty}</p>`;
+    const hand = (m) => (m.handNo != null ? 'Раздача ' + esc(m.handNo) : '');
+    const when = (m) => (byHand ? hand(m) || (m.ts ? date(m.ts) : '') : m.ts ? date(m.ts) : hand(m));
+    const counts = {};
+    for (const m of list) counts[catName(m.cat)] = (counts[catName(m.cat)] || 0) + 1;
+    const more = list.length > limit;
+    return `${more ? `<p class="sc-mcount">${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${esc(c)}\u00a0— ${n}`).join(' · ')}</p>` : ''}
+      <ol class="sc-mlist">${list.map((m, i) => `<li${i >= limit ? ' hidden' : ''}><button class="sc-mrow" data-act="mistake" data-arg="${i}">
+      <span class="sc-mdate">${when(m)}</span><span class="sc-tag">${esc(catName(m.cat))}</span>
+      <span class="sc-mtitle">${txt(m.title || 'Ошибка')}</span></button></li>`).join('')}</ol>
+      ${more ? `<p><button class="btn btn-sm" data-act="more">Показать все (${list.length})</button></p>` : ''}`;
+  }
+  const showAll = (_, el) => { el.closest('.sc-sec').querySelectorAll('.sc-mlist li[hidden]').forEach((li) => { li.hidden = false; }); el.parentElement.remove(); };
 
-  function statsHTML(d) {
+  function statsHTML(d, opts = {}) {
     const t = d.total, played = d.sessions.filter((s) => s.n > 0).length;
+    if (!t.n && !d.mistakes.length && Stats.CATS.every((c) => !d.byCat[c].n)) {
+      return `<section class="panel sc-sec sc-center"><p class="sc-empty">Пока нет ответов. Сыграй несколько раздач — здесь появится твоя точность по категориям, позициям и сессиям.</p>
+        ${opts.onStart ? '<p><button class="btn btn-primary" data-act="start" data-arg="learn">Начать обучение</button></p>' : ''}</section>`;
+    }
     const weak = Stats.CATS.filter((c) => c !== 'tells' && d.byCat[c].n >= 5).sort((a, b) => pct(d.byCat[a]) - pct(d.byCat[b]))[0];
     return `<section class="panel sc-sec sc-overview">${t.n ? `<div class="sc-big">${pct(t)}%</div><div>
         <p class="sc-big-label">верных ответов</p><p class="sc-dim">${t.ok} из ${t.n}, ${U.nplural(played, 'сессия', 'сессии', 'сессий')}</p>
@@ -4266,26 +4573,29 @@ const Screens = (() => {
     ro.observe(box);
   }
 
-  function fillStats(box) {
+  function fillStats(box, opts) {
     const d = Stats.data();
-    box.innerHTML = typo(statsHTML(d));
-    chart(box.querySelector('.sc-chart'), d.sessions.filter((s) => s.n > 0).slice(-20));
+    box.innerHTML = typo(statsHTML(d, opts));
+    const c = box.querySelector('.sc-chart');
+    if (c) chart(c, d.sessions.filter((s) => s.n > 0).slice(-20));
   }
-  function wireStats(box) {
+  function wireStats(box, opts = {}) {
     onAct(box, {
+      start: (mode) => opts.onStart && opts.onStart(mode),
       mistake: (i) => mistake(Stats.data().mistakes[+i]),
       cheat: (tab) => cheatSheet(tab),
       reset: async () => {
         const yes = await modal('Сбросить статистику?', '<p>Удалятся все ответы, сессии и список ошибок. Вернуть их будет нельзя.</p>',
           { buttons: [{ label: 'Отмена', value: false }, { label: 'Сбросить', value: true, cls: 'btn-danger' }] });
-        if (yes) { Stats.reset(); fillStats(box); }
+        if (yes) { Stats.reset(); fillStats(box, opts); }
       },
     });
-    fillStats(box);
+    fillStats(box, opts);
   }
+  // opts: onBack(), onStart(mode) — the empty state offers «Начать обучение» when onStart is given.
   function stats(opts = {}) {
     const root = mount(`<main class="sc sc-stats">${header('Статистика')}<div class="sc-stats-body"></div></main>`, { back: () => opts.onBack && opts.onBack() });
-    wireStats(root.querySelector('.sc-stats-body'));
+    wireStats(root.querySelector('.sc-stats-body'), opts);
   }
   const statsModal = () => modal('Статистика', '<div class="sc-stats-body"></div>', { wide: true, onOpen: (body) => wireStats(body.firstElementChild) });
 
@@ -4298,8 +4608,9 @@ const Screens = (() => {
     rule: () => `<div class="sc-formula">
         <p><b>Одна карта</b> — ставка не олл-ин, ты увидишь только следующую карту:</p><p class="sc-eq">эквити ≈ ауты × 2</p>
         <p><b>Две карты</b> — олл-ин на флопе, ты увидишь и тёрн, и ривер:</p><p class="sc-eq">эквити ≈ ауты × 4</p>
-        <p>Больше 8 аутов — × 4 завышает шанс. Поправка:</p><p class="sc-eq">эквити ≈ ауты × 4 − (ауты − 8)</p></div>
-      ${table(['Ауты', 'Правило × 2', 'Точно, одна карта', 'Правило × 4', 'Точно, две карты'], DRAWS.map(([, o, p1, p2]) => [o, o * 2 + '%', p1 + '%', rule4(o) + '%', p2 + '%']))}
+        <p>Больше 8 аутов — × 4 завышает шанс. Поправка:</p><p class="sc-eq">эквити ≈ ауты × 4 −&nbsp;<span class="sc-nw">(ауты − 8)</span></p></div>
+      ${table(['Ауты', 'Правило × 2', 'Точно, одна карта', 'Правило × 4', 'Точно, две карты'], DRAWS.map(([, o, p1, p2]) => [o, o * 2 + '%', p1 + '%', rule4(o) + '%', p2 + '%']), 1, 'sc-d')}
+      ${table(['Ауты', '× 2 <small class="sc-inline">(точно)</small>', '× 4 <small class="sc-inline">(точно)</small>'], DRAWS.map(([, o, p1, p2]) => [o, `${o * 2}% <small class="sc-inline">(${p1}%)</small>`, `${rule4(o)}% <small class="sc-inline">(${p2}%)</small>`]), 1, 'sc-m')}
       <p class="sc-note"><b>Пример.</b> Флеш-дро и стрит-дро — 15 аутов, соперник на флопе пошёл олл-ин. Ты увидишь две карты: 15 × 4 = 60, поправка 15 − 8 = 7, итого 60 − 7 = 53%. Точное значение — 54%, правило почти не ошибается. Если бы ставка была не олл-ин, ты увидел бы одну карту: 15 × 2 = 30%.</p>`,
     odds: () => `<div class="sc-formula"><p>Сколько эквити нужно, чтобы колл окупался в долгую:</p>
         <p class="sc-eq">нужно % = колл ÷ (банк со ставкой соперника + колл) × 100</p></div>
@@ -4309,8 +4620,8 @@ const Screens = (() => {
       <p class="sc-note"><b>Вместе с правилом 2 и 4.</b> Флеш-дро на тёрне (9 аутов), соперник ставит банк: эквити 9 × 2 = 18%, нужно 33%, значит сброс.</p>`,
     pos: () => `<p class="sc-note">Первый рейз, когда до тебя все сбросили. Нажми на позицию, чтобы увидеть сетку рук.</p>
       ${table(['Позиция', 'Группа', 'Открывай рейзом (стол на 9)'], POSITIONS.map((p) => [
-        `<button class="sc-link sc-pos-btn" data-act="range" data-arg="${p}" data-title="Диапазон открытия: ${p}">${p}</button>`,
-        esc(group(p)), esc(openText(p)) + (POS_NOTE[p] ? `<small>${POS_NOTE[p]}</small>` : '')]), 9, 'sc-wide')}
+        `<button class="sc-link sc-pos-btn" data-act="range" data-arg="${p}" data-title="Диапазон открытия: ${p}">${p}</button><small class="sc-m">${esc(group(p))}</small>`,
+        esc(group(p)), esc(openText(p)) + (POS_NOTE[p] ? `<small>${POS_NOTE[p]}</small>` : '')]), 9, 'sc-wide sc-open')}
       <p class="sc-note">«77+» — 77 и все пары старше, «AJs+» — AJs, AQs, AKs. s — одномастные, o — разномастные. За столом меньше 9 человек ранние позиции убираются: за 6 первым ходит LJ, играй его диапазон.</p>
       <h3>Против рейза</h3>
       <ul class="sc-rules">
@@ -4321,8 +4632,10 @@ const Screens = (() => {
       </ul>
       <p><button class="btn btn-sm" data-act="range" data-arg="vsRaise" data-title="Против рейза">Сетка против рейза</button>
         <button class="btn btn-sm" data-act="range" data-arg="vs3bet" data-title="Против рейза и ререйза">Сетка против 3-бета</button></p>`,
-    types: () => `${table(['Стиль', 'VPIP', 'Рейз префлоп', 'Агрессия после флопа', 'Сброс на ставку', 'Блеф', 'Теллы'],
-        Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return [`<b>${r[0]}</b><small>${r[1]}</small>`, ...r.slice(2, 8)]; }), 9, 'sc-wide')}
+    types: () => `${table(['Стиль', ...STYLE_COLS],
+        Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return [`<b>${r[0]}</b><small>${r[1]}</small>`, ...r.slice(2, 8)]; }), 9, 'sc-wide sc-d')}
+      <div class="sc-m sc-cards">${Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return `<div class="sc-card"><b>${r[0]}</b> <small>${r[1]}</small>
+        <dl>${STYLE_COLS.map((c, i) => `<div><dt>${c}</dt><dd>${r[i + 2]}</dd></div>`).join('')}</dl></div>`; }).join('')}</div>
       <p class="sc-note">VPIP — как часто игрок добровольно вкладывает фишки до флопа. Стиль соперника подписывается после 20 раздач с ним.</p>
       <h3>Как играть против</h3>
       <dl class="sc-vs">${Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return `<dt>${r[0]}</dt><dd>${r[8]}</dd>`; }).join('')}</dl>`,
@@ -4333,16 +4646,22 @@ const Screens = (() => {
     const body = `<div class="sc-tabs" role="tablist">${TABS.map(([id, label]) =>
       `<button class="sc-tab" role="tab" data-act="tab" data-arg="${id}" aria-selected="${id === cur}">${label}</button>`).join('')}</div>
       ${TABS.map(([id]) => `<section class="sc-pane" data-pane="${id}" role="tabpanel"${id === cur ? '' : ' hidden'}>${PANES[id]()}</section>`).join('')}`;
+    // On phones the tabs are one scrolling row: keep the selected one in view.
+    const reveal = (root) => { const t = root.querySelector('.sc-tab[aria-selected="true"]'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); };
     return modal('Шпаргалка', body, {
       wide: true,
-      onOpen: (root) => onAct(root, {
-        tab: (id) => {
-          root.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== id; });
-          root.querySelectorAll('.sc-tab').forEach((b) => b.setAttribute('aria-selected', b.dataset.arg === id));
-          root.closest('.modal').scrollTop = 0;
-        },
-        range: (key, el) => rangeModal(key, el.dataset.title),
-      }),
+      onOpen: (root) => {
+        reveal(root);
+        onAct(root, {
+          tab: (id) => {
+            root.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== id; });
+            root.querySelectorAll('.sc-tab').forEach((b) => b.setAttribute('aria-selected', b.dataset.arg === id));
+            root.closest('.modal').scrollTop = 0;
+            reveal(root);
+          },
+          range: (key, el) => rangeModal(key, el.dataset.title),
+        });
+      },
     });
   }
 
@@ -4387,20 +4706,24 @@ const Screens = (() => {
         ${won ? `<p class="sc-medal" aria-hidden="true">1</p><h1 class="sc-place">Победа! Ты выиграл турнир</h1>
           <p class="sc-sub">Все фишки стола у тебя — за ${U.nplural(hands, 'раздачу', 'раздачи', 'раздач')}.</p>`
         : `<h1 class="sc-place">Ты занял ${place}-е место из ${total}</h1>
-          <p class="sc-sub">Раздач сыграно: ${hands}. Разбери ошибки ниже — так быстрее всего растёт результат.</p>`}
+          <p class="sc-sub">Раздач сыграно: ${hands}. ${mistakes.length ? 'Разбери ошибки ниже — так быстрее всего растёт результат.' : 'Ошибок не было — отличная игра.'}</p>`}
       </div></section>
-      <div class="sc-actions"><button class="btn btn-primary" data-act="again">Сыграть ещё турнир</button><button class="btn" data-act="menu">В меню</button></div>
+      <div class="sc-actions"><button class="btn btn-primary" data-act="again">Сыграть ещё турнир</button><button class="btn" data-act="menu">В меню</button>
+        <button class="btn" data-act="cheat">Шпаргалка</button><button class="btn" data-act="stats">Статистика</button></div>
       <div class="sc-cols">
         <section class="panel sc-sec"><h2>Точность в турнире</h2>
           ${t.n ? `<p class="sc-dim">Верных ответов: ${pct(t)}%, ${t.ok} из ${t.n}.</p>` : ''}${barsHTML(byCat, true)}</section>
         <section class="panel sc-sec"><h2>Вылеты</h2>${elim.length ? `<ol class="sc-elim">${elim.map((e) => `<li><span class="sc-elim-place">${esc(e.place)}-е</span>
           <span>${esc(e.name)}</span><span class="sc-dim">раздача ${esc(e.hand)}</span></li>`).join('')}</ol>` : '<p class="sc-empty">Никто не вылетел.</p>'}</section>
       </div>
-      <section class="panel sc-sec"><h2>Ошибки турнира</h2>${mistakesHTML(mistakes)}</section>
+      <section class="panel sc-sec"><h2>Ошибки турнира</h2>${mistakesHTML(mistakes, { byHand: true, limit: 5, empty: 'Ошибок не было.' })}</section>
     </main>`, {
       again: () => opts.onAgain && opts.onAgain(),
       menu: () => opts.onMenu && opts.onMenu(),
       mistake: (i) => mistake(mistakes[+i]),
+      more: showAll,
+      cheat: () => cheatSheet(),
+      stats: () => statsModal(),
     });
   }
 
@@ -4442,16 +4765,28 @@ const Game = (() => {
     t.dead.catch(() => {});
     return t;
   }
+  // Holds while paused, and on narrow screens while the coach sheet covers the table (the player is reading).
   async function wait(ms) {
     const s = S, tok = s.token;
-    let left = ms * speed();
+    const held = () => s.paused || (!auto() && UI.held);
+    let left = ms * speed(), h;
     do {
-      const step = s.paused ? 100 : Math.min(left, 50);
+      h = held();
+      if (UI.holding) UI.holding(h && !s.paused);
+      const step = h ? 100 : Math.min(left, 50);
       await U.sleep(step);
       if (tok.cancelled) throw CANCEL;
-      if (!s.paused) left -= step;
-    } while (left > 0 || s.paused);
+      if (!h) left -= step;
+    } while (left > 0 || h);
+    if (UI.holding) UI.holding(false);
   }
+  // Pause bookkeeping: S.pausedMs is the total paused time, so decision timers can leave it out.
+  function setPaused(s, on) {
+    if (s.paused === on) return;
+    if (on) s.pausedAt = U.now(); else s.pausedMs += U.now() - s.pausedAt;
+    s.paused = on;
+  }
+  const pausedTotal = (s) => s.pausedMs + (s.paused ? U.now() - s.pausedAt : 0);
   async function guard(p) {
     const tok = S.token;
     const v = await Promise.race([p, tok.dead]);
@@ -4462,8 +4797,8 @@ const Game = (() => {
     const s = S;
     if (!s) return p;
     const was = s.paused;
-    s.paused = true; UI.render();
-    try { return await p; } finally { if (S === s) { s.paused = was; UI.render(); } }
+    setPaused(s, true); UI.render();
+    try { return await p; } finally { if (S === s) { setPaused(s, was); UI.render(); } }
   }
 
   // ---------- session ----------
@@ -4471,14 +4806,14 @@ const Game = (() => {
     if (typeof location !== 'undefined' && /autoplay/.test(location.hash)) api.autoplay = true;
     toMenu();
   }
-  function stop() { if (S) { S.token.kill(); S = null; } }
+  function stop() { if (S) { S.token.kill(); S = null; } if (View.clearToasts) View.clearToasts(); } // toasts belong to the game left
   function toMenu() { stop(); Screens.menu({ onStart: start }); }
   const state = () => (S ? { table: S.table, hand: S.hand, mode: S.mode, over: S.over, paused: S.paused } : null);
 
   const handlers = {
     cheat: () => withPause(Screens.cheatSheet()),
     stats: () => withPause(Screens.statsModal ? Screens.statsModal() : Promise.resolve()),
-    pause: () => { S.paused = !S.paused; UI.render(); },
+    pause: () => { setPaused(S, !S.paused); UI.render(); },
     menu: async () => {
       const ok = await withPause(View.modal('Выйти в меню?', '<p>Текущая игра закончится. Статистика ответов уже сохранена.</p>',
         { buttons: [{ label: 'Остаться', value: false, cls: 'btn-primary' }, { label: 'Выйти в меню', value: true, cls: 'btn-danger' }] }));
@@ -4514,7 +4849,7 @@ const Game = (() => {
     const anim = auto() ? 0 : Settings.speedFactor();
     document.documentElement.style.setProperty('--speed', String(Math.max(anim, 0.01)));
     S = {
-      mode, st, table, hand: null, token: newToken(), paused: false, anim, startStack: stack,
+      mode, st, table, hand: null, token: newToken(), paused: false, pausedMs: 0, pausedAt: 0, anim, startStack: stack,
       level: 0, levelInfo: null, notes: [], thinkHist: [], decisions: 0, lastTimingAt: -99,
       places: [], tMistakes: [], over: null, ctx: null,
       boardShown: 0, reveal: new Set(), winners: null, payouts: null, hl: null, acts: {}, turn: null, caption: '', paid: false,
@@ -4591,7 +4926,7 @@ const Game = (() => {
     UI.logReset();
     const hand = Engine.startHand(table);
     S.hand = hand;
-    S.ctx = { spots: [], reads: [], missed: [], seen: [], think: {}, vpip: new Set(), pfr: new Set(), review: [], humanLast: null };
+    S.ctx = { spots: [], reads: [], missed: [], seen: [], think: {}, shownThink: {}, vpip: new Set(), pfr: new Set(), review: [], humanLast: null };
     for (const s of hand.seats) if (s !== 0) table.players[s].hud.hands++;
     for (const t of S.notes) UI.logLine(t, 'note');
     UI.logStreet('preflop');
@@ -4634,10 +4969,13 @@ const Game = (() => {
     S.turn = seat;
     UI.render();
     const d = Bots.decide({ table, hand, seat, legal, human: humanInfo() });
-    await wait(d.thinkMs * (Engine.inHand(hand, 0) ? 1 : 0.35)); // the hero folded: play the rest out faster
     const pre = hand.street === 'preflop';
+    // the hero folded: play the rest out faster; preflop folds carry no tell, so they don't make the hero wait long
+    const k = (Engine.inHand(hand, 0) ? 1 : 0.35) * (pre && d.action.type === 'fold' ? 0.4 : 1);
+    await wait(d.thinkMs * k);
     const entry = Engine.act(hand, d.action);
     S.ctx.think[seat] = d.thinkMs;
+    S.ctx.shownThink[seat] = d.thinkMs * k * Settings.speedFactor(); // the pause the player actually saw
     const hud = P(seat).hud;
     if (pre && (entry.type === 'call' || entry.type === 'bet' || entry.type === 'raise')) {
       if (!S.ctx.vpip.has(seat)) { S.ctx.vpip.add(seat); hud.vpip++; }
@@ -4689,9 +5027,9 @@ const Game = (() => {
         if (spot && (mode === 'learn' || U.chance(st.practiceFreq / 100))) await askSpot(spot);
       }
     }
-    const t0 = U.now();
+    const t0 = U.now(), p0 = pausedTotal(S);
     const action = await guard(UI.askAction(legal, auto() ? autoAction(legal) : null));
-    const ms = auto() ? U.randInt(800, 3000) : U.now() - t0;
+    const ms = auto() ? U.randInt(800, 3000) : U.now() - t0 - (pausedTotal(S) - p0); // paused time is not thinking time
     S.hint = null; S.rangeKey = null;
     // evaluate against the pre-action state
     const pfb = pre && st.questions.preflop ? Ranges.evaluate(hand, 0, action, table) : null;
@@ -4711,7 +5049,7 @@ const Game = (() => {
       const w = Coach.timing.warning();
       if (w && S.decisions - S.lastTimingAt >= 10) {
         S.lastTimingAt = S.decisions;
-        const fb = { kind: 'timing', verdict: 'acceptable', title: '⚠️ Тайминг выдаёт силу руки', lines: [w] };
+        const fb = { kind: 'timing', verdict: 'acceptable', title: '⚠️ Тайминг выдаёт силу руки', lines: [w], boardN: S.boardShown };
         if (mode === 'tournament') ctx.review.push(fb); else UI.coachFb(fb);
       }
     }
@@ -4720,6 +5058,7 @@ const Game = (() => {
   // Feedback per mode: learn — always; practice — unless correct; tournament — mistakes queued for the review.
   function judge(fb, cat, opts) {
     const ok = fb.verdict !== 'mistake';
+    fb.boardN = S.boardShown; // the board the player saw when deciding (tournament review)
     Stats.record(cat, ok, opts);
     if (!ok) addMistake(fb, cat);
     if (S.mode === 'learn' || (S.mode === 'practice' && fb.verdict !== 'correct')) UI.coachFb(fb);
@@ -4741,19 +5080,20 @@ const Game = (() => {
     const q = { id: 'read', type: 'choice', prompt: 'Что, скорее всего, у соперника?', options: rq.options };
     const answer = await guard(UI.askQuestion(q, { sub, hole: hand.hole[0], board: hand.board }, auto() ? U.pick(rq.options).v : null));
     S.asking = false;
-    S.ctx.reads.push({ read: rq, answer, thinkMs: S.ctx.think[rq.bettor], tellsSeen: S.ctx.seen.filter((r) => r.seat === rq.bettor) });
+    S.ctx.reads.push({ read: rq, answer, thinkMs: S.ctx.think[rq.bettor], shownMs: S.ctx.shownThink[rq.bettor], boardN: S.boardShown, tellsSeen: S.ctx.seen.filter((r) => r.seat === rq.bettor) });
   }
 
   async function askSpot(spot) {
     const { hand, mode, st } = S;
     const qs = Coach.questions(spot, st) || [];
     const answers = {};
+    spot.asked = qs.some((q) => q.id === 'outs' || q.id === 'equity'); // the post-hand real equity checks this estimate
     S.asking = true;
     for (let i = 0; i < qs.length; i++) {
       const q = qs[i];
       S.hint = mode === 'learn' && q.hint ? () => (typeof q.hint === 'string' ? { title: '💡 Подсказка', lines: [q.hint] } : q.hint) : null;
       UI.render();
-      const v = await guard(UI.askQuestion(q, { n: i + 1, of: qs.length, hole: hand.hole[0], board: hand.board }, auto() ? autoAnswer(q, spot) : null));
+      const v = await guard(UI.askQuestion(q, { n: i + 1, of: qs.length, hole: hand.hole[0], board: hand.board, short: !!spot.short }, auto() ? autoAnswer(q, spot) : null));
       S.hint = null;
       const fb = Coach.check(spot, q.id, v, { ...answers });
       answers[q.id] = v;
@@ -4801,6 +5141,7 @@ const Game = (() => {
 
   async function onResult(ev) {
     const { hand } = S, res = ev.result;
+    UI.closeSheet(); // narrow screens: the showdown is played on a visible table
     S.boardShown = hand.board.length;
     S.acts = {};
     if (ev.type === 'showdown') {
@@ -4813,7 +5154,7 @@ const Game = (() => {
       const who = pot.winners.map((s, i) => (i && s === 0 ? 'ты' : P(s).name)).join(' и ');
       const me = pot.winners.includes(0);
       const verb = pot.winners.length > 1 ? (me ? 'делите' : 'делят') : me ? 'забираешь' : 'забирает';
-      const why = res.uncontested ? 'все сбросили' : res.names[pot.winners[0]].toLowerCase();
+      const why = res.uncontested ? 'все сбросили' : res.names[pot.winners[0]].toLowerCase() + kickerNote(res, pot.winners[0], pot.eligible || res.shown);
       return `${res.pots.length > 1 ? pot.name + ': ' : ''}${who} ${verb} ${fmt(pot.amount)} — ${why}`;
     });
     lines.forEach((l) => UI.logLine(l, 'res'));
@@ -4839,23 +5180,25 @@ const Game = (() => {
     const items = mode === 'tournament' ? ctx.review.slice() : [];
     if (hasCoach()) {
       if (mode !== 'tournament') {
-        for (const spot of ctx.spots) if (spot.outs && spot.outs.total > 0) { const fb = Coach.realEquity(spot, hand); if (fb) items.push(fb); }
+        for (const spot of reviewSpots(ctx.spots)) { const fb = Coach.realEquity(spot, hand); if (fb) items.push(fb); }
       }
       for (const r of ctx.reads) {
-        const fb = Coach.readReview(r.read, r.answer, hand, table, { thinkMs: r.thinkMs, tellsSeen: r.tellsSeen });
+        const fb = Coach.readReview(r.read, r.answer, hand, table, { thinkMs: r.thinkMs, shownMs: r.shownMs, tellsSeen: r.tellsSeen });
         if (!fb) continue;
+        fb.boardN = r.boardN;
+        shownSeconds(fb, r.thinkMs, r.shownMs);
         Stats.record('read', fb.verdict !== 'mistake');
         if (fb.verdict === 'mistake') addMistake(fb, 'read');
         items.push(fb);
       }
-      for (const m of ctx.missed) { const fb = Coach.lookHint(m.reactions, table, m.street); if (fb) items.push(fb); }
+      for (const m of ctx.missed) { const fb = Coach.lookHint(m.reactions, table, m.street); if (fb) { fb.boardN = BOARD_N[m.street]; items.push(fb); } }
     }
     let over = null;
     if (mode === 'tournament') {
       const CAT = { preflop: 'preflop', action: 'action', tells: 'tells', timing: 'tells', read: 'read' };
       for (const fb of items) {
         S.tMistakes.push({ ts: Date.now(), cat: CAT[fb.kind] || 'action', title: fb.title, lines: fb.lines, handNo: hand.no, mode,
-          pos: hand.pos[0], hole: hand.hole[0] || [], board: hand.board.slice() });
+          pos: hand.pos[0], hole: hand.hole[0] || [], board: hand.board.slice(0, fb.boardN === undefined ? hand.board.length : fb.boardN) });
       }
       over = tournamentBook(); // after queueing: the summary must include this hand's review
     }
@@ -4871,6 +5214,33 @@ const Game = (() => {
     if (mode !== 'tournament' || showReview) await guard(UI.waitNext(auto()));
     else await wait(1400);
     return false;
+  }
+
+  const BOARD_N = { preflop: 0, flop: 3, turn: 4, river: 5 };
+  // Spots for the post-hand «по правилу / реально» notes: only where the outs/equity questions were asked,
+  // one per street (the last decision there) — two decisions on one street gave identical notes.
+  function reviewSpots(spots) {
+    const last = new Map();
+    for (const sp of spots) if (sp.asked && sp.outs && sp.outs.total > 0) last.set(sp.street || sp.board.length, sp);
+    return [...last.values()];
+  }
+  // The read review quotes the bot's think time; at «Быстро»/«Медленно» the player saw it scaled. The fast/slow
+  // verdict stays on the base value (it is relative to how the bot usually thinks), the seconds are the seen ones.
+  function shownSeconds(fb, raw, shown) {
+    if (!Number.isFinite(raw) || !Number.isFinite(shown)) return;
+    const a = `(${U.dec(raw / 1000, 1)} с)`, b = `(${U.dec(shown / 1000, 1)} с)`;
+    fb.lines = (fb.lines || []).map((l) => (/^Тайминг:/.test(l) ? l.replace(a, b) : l));
+  }
+  // Same hand name at showdown: «, кикер король против дамы» — why the winner's hand is better.
+  function kickerNote(res, w, eligible) {
+    if (res.uncontested || !res.scores || res.scores[w] === null || res.scores[w] === undefined) return '';
+    const rivals = eligible.filter((s) => s !== w && res.names[s] === res.names[w] && res.scores[s] < res.scores[w]);
+    if (!rivals.length) return '';
+    const best = rivals.reduce((a, s) => (res.scores[s] > res.scores[a] ? s : a));
+    const kw = HandEval.kickers(res.scores[w]), kl = HandEval.kickers(res.scores[best]);
+    const i = kw.findIndex((r, k) => r !== kl[k]);
+    if (i < 0 || !kl[i]) return '';
+    return `, кикер ${Cards.rankRu(kw[i], Cards.NOM)} против ${Cards.rankRu(kl[i], Cards.GEN)}`;
   }
 
   // Marks players who just lost their stack as busted and assigns places (worst first).
@@ -4924,7 +5294,7 @@ const Game = (() => {
     return U.chance(0.6) && Number.isFinite(+right) ? Math.round(+right) : U.randInt(0, 40);
   }
 
-  return Object.assign(api, { boot, start, state, toMenu, eliminate, gen });
+  return Object.assign(api, { boot, start, state, toMenu, eliminate, gen, reviewSpots, kickerNote, shownSeconds });
 })();
 
 // ===== 99-main.js =====

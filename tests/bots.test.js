@@ -137,9 +137,10 @@
             if (a.type === 'call') assert.ok(L.canCall);
             if (a.type === 'raise') {
               assert.ok(L.canRaise && Number.isInteger(a.to) && a.to >= L.minTo && a.to <= L.maxTo, JSON.stringify({ a, L }));
-              assert.ok(a.to === L.maxTo || a.to <= 100 || a.to % 5 === 0, 'bets over 100 are multiples of 5: ' + a.to);
+              assert.ok(a.to === L.maxTo || a.to % (a.to > 1000 ? 25 : 5) === 0, 'round bets (5, or 25 over 1000): ' + a.to);
             }
             assert.ok(d.thinkMs >= 400 && d.thinkMs <= 3500, d.thinkMs);
+            if (hand.street === 'preflop' && a.type === 'fold') assert.ok(d.thinkMs <= 800, 'preflop folds are quick: ' + d.thinkMs);
             assert.strictEqual(U.sum(table.players.map((p) => p.stack)) + Engine.pot(hand), total);
             human.lastAction = U.chance(0.5) ? { street: hand.street, type: U.pick(['bet', 'raise', 'call']), thinkMs: U.randInt(300, 9000) } : null;
           },
@@ -258,12 +259,13 @@
           for (const s of hand.seats) {
             if (hand.folded[s]) continue;
             const r = Bots.streetReaction({ table, hand, seat: s, newCards: ev.cards });
-            const c = (by[table.players[s].style] ||= { asked: 0, shown: 0, random: 0, honest: 0, reversed: 0 });
+            const c = (by[table.players[s].style] ||= { asked: 0, shown: 0, random: 0, honest: 0, reversed: 0, strength: 0, strengthTrue: 0 });
             c.asked++;
             if (!r) continue;
             shape(r, s);
             c.shown++;
             if (r.random) assert.ok(!r.acting, 'a random reaction is not a performance');
+            if (r.shown === 'strength') { c.strength++; c.strengthTrue += r.truth === 'strong'; }
             if (r.random) c.random++;
             else if (r.truth !== 'neutral') (r.shown === 'strength') === (r.truth === 'strong') ? c.honest++ : c.reversed++;
           }
@@ -277,6 +279,8 @@
     U.seed(null);
     assert.ok(by.actor.reversed > 3 * by.actor.honest, JSON.stringify(by.actor));
     for (const st of ['rock', 'station']) assert.ok(by[st].honest > 20 && by[st].reversed === 0, st + JSON.stringify(by[st]));
+    // real strong changes are rare, so noise must not swamp the "strength" tell a beginner folds to (ТЗ 9: honest styles)
+    for (const st of ['rock', 'station']) assert.ok(by[st].strengthTrue >= 0.78 * by[st].strength, st + ' strength tells: ' + JSON.stringify(by[st]));
     const rate = (st) => by[st].shown / by[st].asked;
     assert.ok(rate('station') > rate('rock') && rate('rock') > rate('reg'), 'show rates');
     const calm = ['rock', 'station', 'reg', 'actor'];
@@ -425,4 +429,83 @@ test('bots: a reg folds medium hands more often when the human bet after a long 
   const fast = foldRate(1500), slow = foldRate(6000);
   U.seed(null);
   assert.ok(slow > fast + 0.2, `fold rate fast ${fast}, slow ${slow}`);
+});
+
+test('bots: the rock opens a subset of the ТЗ 6.1 table from every position', () => {
+  U.seed(88);
+  let opens = 0;
+  for (let h = 0; h < 1500; h++) {
+    const table = Engine.createTable({ players: Array.from({ length: 9 }, (_, i) => ({ name: 'R' + i, style: 'rock', baseStyle: 'rock' })), button: h % 9 });
+    const hand = Engine.startHand(table);
+    while (hand.phase === 'betting' && hand.street === 'preflop') {
+      const seat = hand.toAct, firstIn = !hand.log.some((e) => e.street === 'preflop' && ['call', 'raise', 'bet'].includes(e.type));
+      const a = Bots.decide({ table, hand, seat, legal: Engine.legal(hand) }).action;
+      if (firstIn && a.type === 'raise' && hand.pos[seat] !== 'BB') {
+        opens++;
+        const code = Cards.handCode(hand.hole[seat][0], hand.hole[seat][1]);
+        assert.ok(Ranges.open(hand.pos[seat]).has(code), `rock opens ${code} from ${hand.pos[seat]}`);
+      }
+      Engine.act(hand, a);
+    }
+  }
+  U.seed(null);
+  assert.ok(opens > 100, 'opens: ' + opens);
+});
+
+test('bots: an all-in call for less is priced against the chips the bot can win, not the shover\'s stack', () => {
+  // seat 0 (SB) shoves into seat 1 (BB, 2000 chips); seat 2 (button) folded. Only the shover's stack changes.
+  const C = (s) => Cards.parseList(s);
+  const callRate = (style, hole, shover, flop) => {
+    let calls = 0;
+    for (let i = 0; i < 100; i++) {
+      const table = Engine.createTable({ players: [{ name: 'A', style: 'maniac', baseStyle: 'maniac', stack: shover },
+        { name: 'B', style, baseStyle: style, stack: 2000 }, { name: 'C', style: 'reg', baseStyle: 'reg', stack: 2000 }], button: 2 });
+      const need = C(hole), rest = U.shuffle(Cards.deck().filter((c) => !need.includes(c))); // pop(): seat 0, then seat 1
+      const hand = Engine.startHand(table, { deck: [...rest.slice(4), need[1], need[0], rest[0], rest[1]] });
+      assert.strictEqual(Cards.strList(hand.hole[1]), Cards.strList(need));
+      Engine.act(hand, { type: 'fold' });
+      if (flop) { Engine.act(hand, { type: 'call' }); Engine.act(hand, { type: 'check' }); Engine.advance(hand); }
+      Engine.act(hand, { type: 'raise', to: Infinity });
+      calls += Bots.decide({ table, hand, seat: 1, legal: Engine.legal(hand) }).action.type !== 'fold';
+    }
+    return calls / 100;
+  };
+  U.seed(99);
+  for (const [style, hole, flop] of [['rock', 'Kc Qd', false], ['rock', 'Ac 8d', false], ['reg', 'Ac Td', false], ['rock', 'Ac 8d', true], ['reg', 'Kc 9d', true]]) {
+    const even = callRate(style, hole, 2000, flop), covered = callRate(style, hole, 15000, flop);
+    assert.ok(Math.abs(covered - even) <= 0.15, `${style} ${hole}${flop ? ' flop' : ''}: calls ${even} vs 2000, ${covered} vs a covering 15000`);
+  }
+  U.seed(null);
+});
+
+test('bots: a station lets big late bets through with air; a rock defends top pair against small bets', () => {
+  // Heads-up: the bot on the button raised to 10 BB, the human called; flop/turn/river checked through, then the human bets.
+  const C = (s) => Cards.parseList(s);
+  const rate = (style, hole, board, toBet, street, want) => {
+    let n = 0;
+    for (let i = 0; i < 300; i++) {
+      const table = Engine.createTable({ players: [{ name: 'Ты', isHuman: true }, { name: 'B', style, baseStyle: style }], button: 1 });
+      const known = [...C('2c 3d'), ...C(hole), ...C(board)]; // dealt with pop(): human hole, bot hole, board
+      const deck = Cards.deck().filter((c) => !known.includes(c)).concat(known.slice().reverse());
+      const hand = Engine.startHand(table, { deck });
+      Engine.act(hand, { type: 'raise', to: 200 });
+      Engine.act(hand, { type: 'call' });
+      for (;;) {
+        Engine.advance(hand);
+        if (hand.street === street) break;
+        Engine.act(hand, { type: 'check' }); Engine.act(hand, { type: 'check' });
+      }
+      assert.strictEqual(Cards.strList(hand.hole[1]), Cards.strList(C(hole)));
+      Engine.act(hand, { type: 'raise', to: toBet });
+      n += Bots.decide({ table, hand, seat: 1, legal: Engine.legal(hand) }).action.type === want;
+    }
+    return n / 300;
+  };
+  U.seed(111);
+  const air = rate('station', 'Th 8c', 'Kd 4c 4d 3s 9c', 400, 'river', 'call'); // pot-size river bet with ten high
+  assert.strictEqual(air, 0, 'station calls a pot-size river bet with air: ' + air);
+  const tp = rate('rock', 'Ac 4c', '3h Td As', 120, 'flop', 'call'); // top pair vs 30% pot
+  const op = rate('rock', 'Jd Jc', 'Th 7d 7c', 200, 'flop', 'call'); // overpair vs half pot
+  assert.ok(tp >= 0.6 && op >= 0.6, `rock calls top pair ${tp}, overpair ${op}`);
+  U.seed(null);
 });

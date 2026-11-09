@@ -65,5 +65,9 @@ const View = (() => {
     setTimeout(() => t.remove(), ms);
   }
 
-  return { cardHTML, cardsHTML, suitText, feedbackHTML, el, modal, toast };
+  function clearToasts() {
+    if (typeof document !== 'undefined') document.querySelectorAll('.toast-wrap .toast').forEach((t) => t.remove());
+  }
+
+  return { cardHTML, cardsHTML, suitText, feedbackHTML, el, modal, toast, clearToasts };
 })();

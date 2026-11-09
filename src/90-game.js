@@ -32,16 +32,28 @@ const Game = (() => {
     t.dead.catch(() => {});
     return t;
   }
+  // Holds while paused, and on narrow screens while the coach sheet covers the table (the player is reading).
   async function wait(ms) {
     const s = S, tok = s.token;
-    let left = ms * speed();
+    const held = () => s.paused || (!auto() && UI.held);
+    let left = ms * speed(), h;
     do {
-      const step = s.paused ? 100 : Math.min(left, 50);
+      h = held();
+      if (UI.holding) UI.holding(h && !s.paused);
+      const step = h ? 100 : Math.min(left, 50);
       await U.sleep(step);
       if (tok.cancelled) throw CANCEL;
-      if (!s.paused) left -= step;
-    } while (left > 0 || s.paused);
+      if (!h) left -= step;
+    } while (left > 0 || h);
+    if (UI.holding) UI.holding(false);
   }
+  // Pause bookkeeping: S.pausedMs is the total paused time, so decision timers can leave it out.
+  function setPaused(s, on) {
+    if (s.paused === on) return;
+    if (on) s.pausedAt = U.now(); else s.pausedMs += U.now() - s.pausedAt;
+    s.paused = on;
+  }
+  const pausedTotal = (s) => s.pausedMs + (s.paused ? U.now() - s.pausedAt : 0);
   async function guard(p) {
     const tok = S.token;
     const v = await Promise.race([p, tok.dead]);
@@ -52,8 +64,8 @@ const Game = (() => {
     const s = S;
     if (!s) return p;
     const was = s.paused;
-    s.paused = true; UI.render();
-    try { return await p; } finally { if (S === s) { s.paused = was; UI.render(); } }
+    setPaused(s, true); UI.render();
+    try { return await p; } finally { if (S === s) { setPaused(s, was); UI.render(); } }
   }
 
   // ---------- session ----------
@@ -61,14 +73,14 @@ const Game = (() => {
     if (typeof location !== 'undefined' && /autoplay/.test(location.hash)) api.autoplay = true;
     toMenu();
   }
-  function stop() { if (S) { S.token.kill(); S = null; } }
+  function stop() { if (S) { S.token.kill(); S = null; } if (View.clearToasts) View.clearToasts(); } // toasts belong to the game left
   function toMenu() { stop(); Screens.menu({ onStart: start }); }
   const state = () => (S ? { table: S.table, hand: S.hand, mode: S.mode, over: S.over, paused: S.paused } : null);
 
   const handlers = {
     cheat: () => withPause(Screens.cheatSheet()),
     stats: () => withPause(Screens.statsModal ? Screens.statsModal() : Promise.resolve()),
-    pause: () => { S.paused = !S.paused; UI.render(); },
+    pause: () => { setPaused(S, !S.paused); UI.render(); },
     menu: async () => {
       const ok = await withPause(View.modal('Выйти в меню?', '<p>Текущая игра закончится. Статистика ответов уже сохранена.</p>',
         { buttons: [{ label: 'Остаться', value: false, cls: 'btn-primary' }, { label: 'Выйти в меню', value: true, cls: 'btn-danger' }] }));
@@ -104,7 +116,7 @@ const Game = (() => {
     const anim = auto() ? 0 : Settings.speedFactor();
     document.documentElement.style.setProperty('--speed', String(Math.max(anim, 0.01)));
     S = {
-      mode, st, table, hand: null, token: newToken(), paused: false, anim, startStack: stack,
+      mode, st, table, hand: null, token: newToken(), paused: false, pausedMs: 0, pausedAt: 0, anim, startStack: stack,
       level: 0, levelInfo: null, notes: [], thinkHist: [], decisions: 0, lastTimingAt: -99,
       places: [], tMistakes: [], over: null, ctx: null,
       boardShown: 0, reveal: new Set(), winners: null, payouts: null, hl: null, acts: {}, turn: null, caption: '', paid: false,
@@ -181,7 +193,7 @@ const Game = (() => {
     UI.logReset();
     const hand = Engine.startHand(table);
     S.hand = hand;
-    S.ctx = { spots: [], reads: [], missed: [], seen: [], think: {}, vpip: new Set(), pfr: new Set(), review: [], humanLast: null };
+    S.ctx = { spots: [], reads: [], missed: [], seen: [], think: {}, shownThink: {}, vpip: new Set(), pfr: new Set(), review: [], humanLast: null };
     for (const s of hand.seats) if (s !== 0) table.players[s].hud.hands++;
     for (const t of S.notes) UI.logLine(t, 'note');
     UI.logStreet('preflop');
@@ -224,10 +236,13 @@ const Game = (() => {
     S.turn = seat;
     UI.render();
     const d = Bots.decide({ table, hand, seat, legal, human: humanInfo() });
-    await wait(d.thinkMs * (Engine.inHand(hand, 0) ? 1 : 0.35)); // the hero folded: play the rest out faster
     const pre = hand.street === 'preflop';
+    // the hero folded: play the rest out faster; preflop folds carry no tell, so they don't make the hero wait long
+    const k = (Engine.inHand(hand, 0) ? 1 : 0.35) * (pre && d.action.type === 'fold' ? 0.4 : 1);
+    await wait(d.thinkMs * k);
     const entry = Engine.act(hand, d.action);
     S.ctx.think[seat] = d.thinkMs;
+    S.ctx.shownThink[seat] = d.thinkMs * k * Settings.speedFactor(); // the pause the player actually saw
     const hud = P(seat).hud;
     if (pre && (entry.type === 'call' || entry.type === 'bet' || entry.type === 'raise')) {
       if (!S.ctx.vpip.has(seat)) { S.ctx.vpip.add(seat); hud.vpip++; }
@@ -279,9 +294,9 @@ const Game = (() => {
         if (spot && (mode === 'learn' || U.chance(st.practiceFreq / 100))) await askSpot(spot);
       }
     }
-    const t0 = U.now();
+    const t0 = U.now(), p0 = pausedTotal(S);
     const action = await guard(UI.askAction(legal, auto() ? autoAction(legal) : null));
-    const ms = auto() ? U.randInt(800, 3000) : U.now() - t0;
+    const ms = auto() ? U.randInt(800, 3000) : U.now() - t0 - (pausedTotal(S) - p0); // paused time is not thinking time
     S.hint = null; S.rangeKey = null;
     // evaluate against the pre-action state
     const pfb = pre && st.questions.preflop ? Ranges.evaluate(hand, 0, action, table) : null;
@@ -301,7 +316,7 @@ const Game = (() => {
       const w = Coach.timing.warning();
       if (w && S.decisions - S.lastTimingAt >= 10) {
         S.lastTimingAt = S.decisions;
-        const fb = { kind: 'timing', verdict: 'acceptable', title: '⚠️ Тайминг выдаёт силу руки', lines: [w] };
+        const fb = { kind: 'timing', verdict: 'acceptable', title: '⚠️ Тайминг выдаёт силу руки', lines: [w], boardN: S.boardShown };
         if (mode === 'tournament') ctx.review.push(fb); else UI.coachFb(fb);
       }
     }
@@ -310,6 +325,7 @@ const Game = (() => {
   // Feedback per mode: learn — always; practice — unless correct; tournament — mistakes queued for the review.
   function judge(fb, cat, opts) {
     const ok = fb.verdict !== 'mistake';
+    fb.boardN = S.boardShown; // the board the player saw when deciding (tournament review)
     Stats.record(cat, ok, opts);
     if (!ok) addMistake(fb, cat);
     if (S.mode === 'learn' || (S.mode === 'practice' && fb.verdict !== 'correct')) UI.coachFb(fb);
@@ -331,19 +347,20 @@ const Game = (() => {
     const q = { id: 'read', type: 'choice', prompt: 'Что, скорее всего, у соперника?', options: rq.options };
     const answer = await guard(UI.askQuestion(q, { sub, hole: hand.hole[0], board: hand.board }, auto() ? U.pick(rq.options).v : null));
     S.asking = false;
-    S.ctx.reads.push({ read: rq, answer, thinkMs: S.ctx.think[rq.bettor], tellsSeen: S.ctx.seen.filter((r) => r.seat === rq.bettor) });
+    S.ctx.reads.push({ read: rq, answer, thinkMs: S.ctx.think[rq.bettor], shownMs: S.ctx.shownThink[rq.bettor], boardN: S.boardShown, tellsSeen: S.ctx.seen.filter((r) => r.seat === rq.bettor) });
   }
 
   async function askSpot(spot) {
     const { hand, mode, st } = S;
     const qs = Coach.questions(spot, st) || [];
     const answers = {};
+    spot.asked = qs.some((q) => q.id === 'outs' || q.id === 'equity'); // the post-hand real equity checks this estimate
     S.asking = true;
     for (let i = 0; i < qs.length; i++) {
       const q = qs[i];
       S.hint = mode === 'learn' && q.hint ? () => (typeof q.hint === 'string' ? { title: '💡 Подсказка', lines: [q.hint] } : q.hint) : null;
       UI.render();
-      const v = await guard(UI.askQuestion(q, { n: i + 1, of: qs.length, hole: hand.hole[0], board: hand.board }, auto() ? autoAnswer(q, spot) : null));
+      const v = await guard(UI.askQuestion(q, { n: i + 1, of: qs.length, hole: hand.hole[0], board: hand.board, short: !!spot.short }, auto() ? autoAnswer(q, spot) : null));
       S.hint = null;
       const fb = Coach.check(spot, q.id, v, { ...answers });
       answers[q.id] = v;
@@ -391,6 +408,7 @@ const Game = (() => {
 
   async function onResult(ev) {
     const { hand } = S, res = ev.result;
+    UI.closeSheet(); // narrow screens: the showdown is played on a visible table
     S.boardShown = hand.board.length;
     S.acts = {};
     if (ev.type === 'showdown') {
@@ -403,7 +421,7 @@ const Game = (() => {
       const who = pot.winners.map((s, i) => (i && s === 0 ? 'ты' : P(s).name)).join(' и ');
       const me = pot.winners.includes(0);
       const verb = pot.winners.length > 1 ? (me ? 'делите' : 'делят') : me ? 'забираешь' : 'забирает';
-      const why = res.uncontested ? 'все сбросили' : res.names[pot.winners[0]].toLowerCase();
+      const why = res.uncontested ? 'все сбросили' : res.names[pot.winners[0]].toLowerCase() + kickerNote(res, pot.winners[0], pot.eligible || res.shown);
       return `${res.pots.length > 1 ? pot.name + ': ' : ''}${who} ${verb} ${fmt(pot.amount)} — ${why}`;
     });
     lines.forEach((l) => UI.logLine(l, 'res'));
@@ -429,23 +447,25 @@ const Game = (() => {
     const items = mode === 'tournament' ? ctx.review.slice() : [];
     if (hasCoach()) {
       if (mode !== 'tournament') {
-        for (const spot of ctx.spots) if (spot.outs && spot.outs.total > 0) { const fb = Coach.realEquity(spot, hand); if (fb) items.push(fb); }
+        for (const spot of reviewSpots(ctx.spots)) { const fb = Coach.realEquity(spot, hand); if (fb) items.push(fb); }
       }
       for (const r of ctx.reads) {
-        const fb = Coach.readReview(r.read, r.answer, hand, table, { thinkMs: r.thinkMs, tellsSeen: r.tellsSeen });
+        const fb = Coach.readReview(r.read, r.answer, hand, table, { thinkMs: r.thinkMs, shownMs: r.shownMs, tellsSeen: r.tellsSeen });
         if (!fb) continue;
+        fb.boardN = r.boardN;
+        shownSeconds(fb, r.thinkMs, r.shownMs);
         Stats.record('read', fb.verdict !== 'mistake');
         if (fb.verdict === 'mistake') addMistake(fb, 'read');
         items.push(fb);
       }
-      for (const m of ctx.missed) { const fb = Coach.lookHint(m.reactions, table, m.street); if (fb) items.push(fb); }
+      for (const m of ctx.missed) { const fb = Coach.lookHint(m.reactions, table, m.street); if (fb) { fb.boardN = BOARD_N[m.street]; items.push(fb); } }
     }
     let over = null;
     if (mode === 'tournament') {
       const CAT = { preflop: 'preflop', action: 'action', tells: 'tells', timing: 'tells', read: 'read' };
       for (const fb of items) {
         S.tMistakes.push({ ts: Date.now(), cat: CAT[fb.kind] || 'action', title: fb.title, lines: fb.lines, handNo: hand.no, mode,
-          pos: hand.pos[0], hole: hand.hole[0] || [], board: hand.board.slice() });
+          pos: hand.pos[0], hole: hand.hole[0] || [], board: hand.board.slice(0, fb.boardN === undefined ? hand.board.length : fb.boardN) });
       }
       over = tournamentBook(); // after queueing: the summary must include this hand's review
     }
@@ -461,6 +481,33 @@ const Game = (() => {
     if (mode !== 'tournament' || showReview) await guard(UI.waitNext(auto()));
     else await wait(1400);
     return false;
+  }
+
+  const BOARD_N = { preflop: 0, flop: 3, turn: 4, river: 5 };
+  // Spots for the post-hand «по правилу / реально» notes: only where the outs/equity questions were asked,
+  // one per street (the last decision there) — two decisions on one street gave identical notes.
+  function reviewSpots(spots) {
+    const last = new Map();
+    for (const sp of spots) if (sp.asked && sp.outs && sp.outs.total > 0) last.set(sp.street || sp.board.length, sp);
+    return [...last.values()];
+  }
+  // The read review quotes the bot's think time; at «Быстро»/«Медленно» the player saw it scaled. The fast/slow
+  // verdict stays on the base value (it is relative to how the bot usually thinks), the seconds are the seen ones.
+  function shownSeconds(fb, raw, shown) {
+    if (!Number.isFinite(raw) || !Number.isFinite(shown)) return;
+    const a = `(${U.dec(raw / 1000, 1)} с)`, b = `(${U.dec(shown / 1000, 1)} с)`;
+    fb.lines = (fb.lines || []).map((l) => (/^Тайминг:/.test(l) ? l.replace(a, b) : l));
+  }
+  // Same hand name at showdown: «, кикер король против дамы» — why the winner's hand is better.
+  function kickerNote(res, w, eligible) {
+    if (res.uncontested || !res.scores || res.scores[w] === null || res.scores[w] === undefined) return '';
+    const rivals = eligible.filter((s) => s !== w && res.names[s] === res.names[w] && res.scores[s] < res.scores[w]);
+    if (!rivals.length) return '';
+    const best = rivals.reduce((a, s) => (res.scores[s] > res.scores[a] ? s : a));
+    const kw = HandEval.kickers(res.scores[w]), kl = HandEval.kickers(res.scores[best]);
+    const i = kw.findIndex((r, k) => r !== kl[k]);
+    if (i < 0 || !kl[i]) return '';
+    return `, кикер ${Cards.rankRu(kw[i], Cards.NOM)} против ${Cards.rankRu(kl[i], Cards.GEN)}`;
   }
 
   // Marks players who just lost their stack as busted and assigns places (worst first).
@@ -514,5 +561,5 @@ const Game = (() => {
     return U.chance(0.6) && Number.isFinite(+right) ? Math.round(+right) : U.randInt(0, 40);
   }
 
-  return Object.assign(api, { boot, start, state, toMenu, eliminate, gen });
+  return Object.assign(api, { boot, start, state, toMenu, eliminate, gen, reviewSpots, kickerNote, shownSeconds });
 })();

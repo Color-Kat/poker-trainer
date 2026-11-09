@@ -7,7 +7,7 @@ const UI = (() => {
   let act = null, nextRes = null, keysBound = false, popSeat = null, tipFor = null;
   const MODE_RU = { learn: 'Обучение', practice: 'Тренировка', tournament: 'Турнир' };
   const STREET_RU = { preflop: 'Префлоп', flop: 'Флоп', turn: 'Тёрн', river: 'Ривер' };
-  const QUICK = [['1/3', 1 / 3], ['1/2', 0.5], ['2/3', 2 / 3], ['Банк', 1], ['Олл-ин', 'all']];
+  const QUICK = ['1/3', '1/2', '2/3', 'Банк', 'Олл-ин'];
   const $ = (sel, el = root) => el.querySelector(sel);
   const $$ = (sel, el = root) => [...el.querySelectorAll(sel)];
   const put = (el, html) => { if (el && el._h !== html) { el._h = html; el.innerHTML = html; } };
@@ -57,7 +57,7 @@ const UI = (() => {
           <div class="look-bar"><i></i></div>
         </div>
         <div class="pop hidden"></div>
-        <div class="veil hidden">Пауза</div>
+        <div class="veil hidden"><span>Пауза</span></div>
       </div></div>
       <div class="dock idle"><div class="dock-in">
         <div class="d-aux">
@@ -65,10 +65,10 @@ const UI = (() => {
           <button class="btn btn-sm d-range" data-cmd="range" title="Посмотреть диапазон">${IC.grid}<span class="lbl">Посмотреть диапазон</span></button>
           <div class="d-msg"></div>
         </div>
-        <div class="quick">${QUICK.map(([l, f]) => `<button class="btn btn-sm" data-q="${f}">${l}</button>`).join('')}</div>
+        <div class="quick">${QUICK.map((l, k) => `<button class="btn btn-sm" data-q="${k}" aria-pressed="false">${l}</button>`).join('')}</div>
         <div class="slide"><input type="range" class="amt-r" aria-label="Размер ставки"><input type="number" class="amt-n" inputmode="numeric" aria-label="Сумма ставки"></div>
         <div class="d-main">
-          <button class="btn act act-fold" data-act="fold">Сброс<kbd>F</kbd></button>
+          <button class="btn act act-fold" data-act="fold"><span>Сброс</span><kbd>F</kbd></button>
           <button class="btn act act-call" data-act="call"><span>Чек</span><kbd>C</kbd></button>
           <button class="btn btn-primary act act-raise" data-act="raise"><span>Рейз</span><kbd>R</kbd></button>
         </div>
@@ -120,7 +120,12 @@ const UI = (() => {
     if (!keysBound) {
       keysBound = true;
       document.addEventListener('keydown', onKey);
-      window.addEventListener('resize', () => { hidePop(); hideTip(); });
+      window.addEventListener('resize', () => {
+        hidePop(); hideTip();
+        if (root && root.isConnected) renderDealer();
+        const f = document.activeElement;
+        if (f && f.closest && f.closest('.c-q')) f.scrollIntoView({ block: 'nearest' });
+      });
     }
     setupSeats();
     render();
@@ -128,6 +133,7 @@ const UI = (() => {
 
   function setupSeats() {
     const n = S.table.players.length;
+    tableEl.className = 'ptable n' + n;
     put($('.seats'), ''); put($('.bets'), '');
     seatEls = []; betEls = []; prevBets = [];
     S.table.players.forEach((p, i) => {
@@ -138,7 +144,7 @@ const UI = (() => {
         <div class="s-cards"></div>
         <div class="plate"><div class="av" style="--avc:${esc(av.color)}">${esc(av.initials)}</div><div class="s-info"></div><span class="posb"></span></div>
         <div class="s-status"></div><div class="bubble"></div></div>`);
-      const bet = View.el(`<div class="bet hidden${i === 0 ? ' me' : ''}" style="--x:${x.toFixed(4)};--y:${y.toFixed(4)}"></div>`);
+      const bet = View.el(`<div class="bet hidden${i === 0 ? ' me' : ''}${side}" style="--x:${x.toFixed(4)};--y:${y.toFixed(4)}"></div>`);
       $('.seats').appendChild(seat); $('.bets').appendChild(bet);
       seatEls.push(seat); betEls.push(bet); prevBets.push(0);
     });
@@ -158,11 +164,14 @@ const UI = (() => {
 
   function renderHead() {
     const t = S.table, h = S.hand;
-    let html = h ? `<span><i class="k">Раздача </i><b>№${h.no}</b></span>` : '';
-    html += `<span><i class="k">Блайнды </i><b>${fmt(t.sb)}/${fmt(t.bb)}</b></span>`;
+    const no = h ? `<span class="hno"><i class="k">Раздача </i><b>№${h.no}</b></span>` : '';
+    let html = `<span><i class="k">Блайнды </i><b>${fmt(t.sb)}/${fmt(t.bb)}</b></span>`;
     const L = S.mode === 'tournament' && S.levelInfo;
-    if (L) html += `<span>Уровень <b>${L.level}</b></span>` + (L.left ? `<span><i class="k">До повышения </i><b>${U.nplural(L.left, 'раздача', 'раздачи', 'раздач')}</b></span>` : '');
-    put($('.hinfo'), html);
+    // Tournament: level and the countdown come before the hand number, so a narrow header cuts the number first.
+    if (L) html += `<span><i class="k">Уровень </i><i class="ks">Ур. </i><b>${L.level}</b></span>` +
+      (L.left ? `<span title="Блайнды вырастут через ${U.nplural(L.left, 'раздачу', 'раздачи', 'раздач')}">↑ через <b>${L.left}</b><i class="k"> ${U.plural(L.left, 'раздачу', 'раздачи', 'раздач')}</i></span>` : '');
+    put($('.hinfo'), L ? html + no : no + html);
+    tog(root, 'paused', S.paused);
     const pb = $('[data-cmd="pause"]');
     put(pb, (S.paused ? IC.play : IC.pause) + `<span class="lbl">${S.paused ? 'Продолжить' : 'Пауза'}</span>`);
     pb.title = S.paused ? 'Продолжить' : 'Пауза';
@@ -234,7 +243,10 @@ const UI = (() => {
   function sidePots(h) {
     // Display-only split of committed chips into main/side pots by all-in levels.
     const seats = h.seats || h.committed.map((_, i) => i);
-    const paid = (s) => h.committed[s] - (h.returned ? h.returned[s] : 0);
+    const raw = (s) => h.committed[s] - (h.returned ? h.returned[s] : 0);
+    // Chips above the second-largest contribution are uncalled (Engine returns them): never a «Побочный».
+    const cap = h.committed.map((_, s) => raw(s)).sort((a, b) => b - a)[1] || 0;
+    const paid = (s) => Math.min(raw(s), cap);
     const levels = [...new Set(seats.filter((s) => h.allIn[s] && !h.folded[s]).map(paid))].sort((a, b) => a - b);
     const pots = [];
     let prev = 0;
@@ -295,8 +307,13 @@ const UI = (() => {
     const a = (90 + (btn * 360) / n) * Math.PI / 180;
     d.style.setProperty('--x', Math.cos(a).toFixed(4));
     d.style.setProperty('--y', Math.sin(a).toFixed(4));
-    if (btn === 0) { d.style.setProperty('--f', '0.62'); d.style.setProperty('--toff', '-110px'); }
-    else { d.style.removeProperty('--f'); d.style.removeProperty('--toff'); }
+    // The hero's seat is pinned to the bottom edge, off the oval: put the disc just left of the hero's plate.
+    const plate = btn === 0 && seatEls[0] && $('.plate', seatEls[0]);
+    if (plate && plate.offsetWidth) {
+      const pr = plate.getBoundingClientRect(), tr = tableEl.getBoundingClientRect();
+      d.style.left = (pr.left - tr.left - d.offsetWidth / 2 - 6).toFixed(1) + 'px';
+      d.style.top = (pr.top - tr.top + pr.height / 2).toFixed(1) + 'px';
+    } else { d.style.left = ''; d.style.top = ''; }
   }
 
   // ---------- action dock ----------
@@ -304,15 +321,17 @@ const UI = (() => {
 
   function renderDock() {
     if (!dock) return;
-    const L = act && act.legal;
+    const L = act && act.legal, off = !L || S.paused; // paused: the dock is inert
     tog(dock, 'idle', !L);
     tog(dock, 'next', !!nextRes);
     const [fold, call, raise] = $$('.d-main .btn', dock);
-    fold.disabled = !L; call.disabled = !L;
-    raise.disabled = !L || !L.canRaise;
-    $$('.quick .btn, .slide input', dock).forEach((b) => { b.disabled = !L || !L.canRaise; });
-    put($('span', call), !L ? 'Чек / колл' : L.canCheck ? 'Чек' : L.toCall >= L.stack ? `Олл-ин ${fmt(L.toCall)}` : `Колл ${fmt(L.toCall)}`);
-    put($('span', raise), !L ? 'Ставка / рейз' : L.canRaise ? raiseLabel(L, amount()) : 'Рейз');
+    fold.disabled = off; call.disabled = off;
+    raise.disabled = off || !L.canRaise;
+    $$('.quick .btn, .slide input', dock).forEach((b) => { b.disabled = off || !L.canRaise; });
+    $('.d-next .btn', dock).disabled = !!S.paused;
+    put($('span', fold), act && act.foldArmed ? 'Точно сбросить?' : 'Сброс');
+    put($('span', call), !L ? 'Колл' : L.canCheck ? 'Чек' : L.toCall >= L.stack ? `Олл-ин ${fmt(L.toCall)}` : `Колл ${fmt(L.toCall)}`);
+    put($('span', raise), !L ? 'Рейз' : L.canRaise ? raiseLabel(L, amount()) : 'Рейз');
     $('.d-hint', dock).disabled = !(S.hint && S.mode === 'learn');
     $('.d-range', dock).disabled = !S.rangeKey;
     tog($('.d-next', dock), 'hidden', !nextRes);
@@ -321,6 +340,8 @@ const UI = (() => {
   }
 
   function dockMsg() {
+    if (S.paused) return 'Пауза — нажми «Продолжить».';
+    if (act && act.foldArmed) return 'Чек бесплатный. Нажми «Сброс» ещё раз, если всё же хочешь сбросить.';
     if (nextRes) return 'Раздача окончена.';
     if (act) return 'Твой ход.';
     if (S.asking) return 'Ответь на вопрос тренера.';
@@ -339,33 +360,68 @@ const UI = (() => {
     if (!L) return;
     v = U.clamp(Math.round(v), L.minTo, L.maxTo);
     const r = $('.amt-r', dock), n = $('.amt-n', dock);
-    r.min = n.min = L.minTo; r.max = n.max = L.maxTo; r.step = 1;
+    r.min = n.min = L.minTo; r.max = n.max = L.maxTo; r.step = 1; // the slider snaps through nice() in onInput
     r.value = n.value = v;
     put($('.act-raise span', dock), raiseLabel(L, v));
+    const on = act.sizes ? act.sizes.map((s) => s[1]).lastIndexOf(v) : -1; // sizes that collapse to one amount light one button
+    $$('.quick .btn', dock).forEach((b, k) => b.setAttribute('aria-pressed', String(k === on)));
   }
-  function defaultRaise(L) {
-    const h = S.hand;
-    if (h.street === 'preflop') return Math.max(L.minTo, Math.round(L.currentBet * 3));
-    return typeof Engine !== 'undefined' && Engine.sizeTo ? Engine.sizeTo(h, 0.66) : L.minTo;
+
+  // ---------- bet sizing: chip-friendly amounts, beginner-standard preflop sizes ----------
+  // Snap to ½ BB below 10 BB, 1 BB below 50 BB, 2½ BB above; within [minTo, maxTo]; near all-in → exact all-in.
+  function nice(v, L, bb) {
+    const st = v < 10 * bb ? bb / 2 : v < 50 * bb ? bb : 2.5 * bb;
+    let r = Math.round(v / st) * st;
+    if (L.maxTo - r < st) r = L.maxTo;
+    return U.clamp(r, L.minTo, L.maxTo);
   }
+  // Players who just called the big blind preflop (the hero excluded).
+  const limpers = (h) => h.seats.filter((s) => s !== 0 && s !== h.bbSeat && !h.folded[s] && h.bets[s] >= h.bb).length;
+  // [[label, raise-to] × 5]: preflop in big blinds (+1 BB per limper) or multiples of the raise; postflop pot fractions.
+  function quickSizes(h, L) {
+    const bb = h.bb, potTo = (f) => nice(Engine.sizeTo(h, f), L, bb), tail = [['Банк', potTo(1)], ['Олл-ин', L.maxTo]];
+    if (h.street !== 'preflop') return [['1/3', potTo(1 / 3)], ['1/2', potTo(0.5)], ['2/3', potTo(2 / 3)], ...tail];
+    const lim = limpers(h);
+    return [2.5, 3, 4].map((k) => (h.raises ? [`×${U.dec(k)}`, nice(k * L.currentBet, L, bb)] : [`${U.dec(k)} BB`, nice((k + lim) * bb, L, bb)])).concat(tail);
+  }
+  // Default raise-to: open 3 BB + 1 BB per limper; ×3 against a raise or a postflop bet; ⅔ pot as a postflop bet.
+  function defaultRaise(h, L) {
+    if (h.street === 'preflop') return h.raises ? nice(3 * L.currentBet, L, h.bb) : nice((3 + limpers(h)) * h.bb, L, h.bb);
+    return L.currentBet ? nice(3 * L.currentBet, L, h.bb) : nice(Engine.sizeTo(h, 2 / 3), L, h.bb);
+  }
+
+  // Runs fn once the game is not paused (autoplay must not act through the Pause veil either).
+  const whenRunning = (fn) => (S && S.paused ? setTimeout(() => whenRunning(fn), 100) : fn());
 
   function askAction(legal, auto) {
     return new Promise((resolve) => {
-      act = { legal, resolve };
-      if (legal.canRaise) setAmount(defaultRaise(legal));
+      // phones: the player decides looking at the table, not at the coach sheet; the dot says the last verdict waits there
+      if (!wide() && side.classList.contains('open')) { closeSheet(); $('.tab[data-tab="coach"]').classList.add('new'); }
+      act = { legal, resolve, sizes: legal.canRaise ? quickSizes(S.hand, legal) : null };
+      if (act.sizes) {
+        $$('.quick .btn', dock).forEach((b, k) => put(b, esc(act.sizes[k][0])));
+        setAmount(defaultRaise(S.hand, legal));
+      } else $$('.quick .btn', dock).forEach((b) => b.setAttribute('aria-pressed', 'false'));
       renderDock();
-      if (auto) setTimeout(() => {
+      if (auto) setTimeout(() => whenRunning(() => {
         if (!act || act.resolve !== resolve) return;
         if (auto.type === 'raise') setAmount(auto.to);
         doAct(auto.type === 'check' ? 'call' : auto.type);
-      }, 0);
+      }), 0);
     });
   }
 
   function doAct(type) {
-    if (!act) return;
+    if (!act || S.paused) return;
     const L = act.legal;
     let a;
+    // A free check is never folded by a single slip (learn and practice): the first press asks to confirm.
+    if (type === 'fold' && L.canCheck && S.mode !== 'tournament' && !act.foldArmed) {
+      const cur = act;
+      cur.foldArmed = true;
+      setTimeout(() => { if (act === cur) { cur.foldArmed = false; renderDock(); } }, 2500);
+      return renderDock();
+    }
     if (type === 'fold') a = { type: 'fold' };
     else if (type === 'call') a = { type: L.canCheck ? 'check' : 'call' };
     else if (type === 'raise' && L.canRaise) a = { type: 'raise', to: amount() };
@@ -376,26 +432,24 @@ const UI = (() => {
     r(a);
   }
 
-  function quick(f) {
-    const L = act && act.legal;
-    if (!L || !L.canRaise) return;
-    setAmount(f === 'all' ? L.maxTo : Engine.sizeTo(S.hand, +f));
+  function quick(k) {
+    if (!act || !act.sizes || S.paused) return;
+    setAmount(act.sizes[+k][1]);
   }
 
+  // One «next» control: the dock button (the coach column no longer repeats it).
   function waitNext(auto, label = 'Следующая раздача') {
     return new Promise((resolve) => {
       nextRes = resolve;
-      put($('.coach-foot'), `<button class="btn btn-primary" data-cmd="next">${esc(label)}</button>`);
       put($('.d-next .btn', dock), esc(label));
       renderDock();
-      if (auto) setTimeout(() => { if (nextRes === resolve) $('.d-next .btn', dock).click(); }, 0);
+      if (auto) setTimeout(() => whenRunning(() => { if (nextRes === resolve) resolveNext(); }), 0);
     });
   }
   function resolveNext() {
-    if (!nextRes) return;
+    if (!nextRes || S.paused) return;
     const r = nextRes;
     nextRes = null;
-    put($('.coach-foot'), '');
     renderDock();
     r();
   }
@@ -415,6 +469,7 @@ const UI = (() => {
     const tab = t.closest('.side-tabs [data-tab]');
     if (tab) return tabClick(tab.dataset.tab);
     const seat = t.closest('.seat');
+    if (seat && seat.dataset.seat === '0' && t.closest('.plate')) { const pb = $('.posb', seat); if (pb.dataset.tip) { if (tipFor === pb) hideTip(); else showTip(pb); } return; }
     if (seat && seat.dataset.seat !== '0') return popSeat === +seat.dataset.seat ? hidePop() : showPop(+seat.dataset.seat);
     if (!t.closest('.pop')) hidePop();
   }
@@ -429,7 +484,7 @@ const UI = (() => {
 
   function onInput(e) {
     const t = e.target;
-    if (t.classList.contains('amt-r')) setAmount(+t.value);
+    if (t.classList.contains('amt-r')) { if (act) setAmount(nice(+t.value, act.legal, S.hand.bb)); }
     else if (t.classList.contains('amt-n') && e.type === 'change') setAmount(amount());
     else if (t.classList.contains('amt-n')) {
       const L = act && act.legal, v = Math.round(+t.value);
@@ -442,9 +497,10 @@ const UI = (() => {
     if (document.querySelector('.modal-back')) return;
     if (e.key === 'Escape') { hidePop(); hideTip(); return; }
     const tag = e.target && e.target.tagName;
-    const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    const inField = (tag === 'INPUT' && e.target.type !== 'range') || tag === 'TEXTAREA' || tag === 'SELECT'; // the bet slider keeps F/C/R
     if (e.key === 'Enter') {
       if (e.target.classList && e.target.classList.contains('amt-n')) { e.preventDefault(); setAmount(amount()); doAct('raise'); return; }
+      if (e.target.classList && e.target.classList.contains('amt-r')) { e.preventDefault(); doAct('raise'); return; }
       if (inField || (tag === 'BUTTON' && !e.target.disabled)) return; // a focused button handles Enter itself
       if (nextRes) { e.preventDefault(); resolveNext(); }
       return;
@@ -486,16 +542,26 @@ const UI = (() => {
     flagNew(peek);
     return el;
   }
-  const coachFb = (fb) => coachAdd(View.feedbackHTML(fb), 'c-fb', `<span class="v-${fb.verdict || 'info'}">${View.suitText(fb.title || '')}</span>`);
+  // Narrow screens: a learn-mode mistake opens the sheet (the game waits while it is open — see held), so it is read, not missed.
+  function coachFb(fb) {
+    const el = coachAdd(View.feedbackHTML(fb), 'c-fb', `<span class="v-${fb.verdict || 'info'}">${View.suitText(fb.title || '')}</span>`);
+    if (S.mode === 'learn' && fb.verdict === 'mistake' && !wide()) openSheet('coach');
+    return el;
+  }
   function review(items) {
     coachAdd('<div class="c-sep">Разбор раздачи</div>' + items.map(View.feedbackHTML).join(''), 'c-review', 'Разбор раздачи готов');
+    if (!wide()) openSheet('coach');
   }
+  // The coach sheet covers the table on narrow screens: while it is open the game holds (Game.wait), like Pause.
+  const held = () => !!side && side.classList.contains('open') && !wide();
+  function holding(on) { tog(side, 'hold', on); }
 
   // q = { id, type: 'number'|'choice', prompt, unit, options, info, hint }; ctx = { n, of, hole, board, sub }
   function askQuestion(q, ctx, auto) {
     return new Promise((resolve) => {
       const opts = (q.options || []).map((o) => (o && typeof o === 'object' ? o : { v: o, label: String(o) }));
-      const info = q.info ? [['Банк со ставкой', q.info.pot], ['Ставка соперника', q.info.bet], ['Тебе доплатить', q.info.toCall]]
+      const short = (ctx && ctx.short) || (q.info && q.info.short); // short all-in call: only part of the pot can be won
+      const info = q.info ? [[short ? 'Банк, который ты можешь выиграть' : 'Банк со ставкой', q.info.pot], ['Ставка соперника', q.info.bet], ['Тебе доплатить', q.info.toCall]]
         .filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => `<span>${k}: <b>${fmt(v)}</b></span>`).join('') : '';
       const hand = ctx && ctx.hole ? `<div class="c-q-hand"><span>Твои карты ${View.cardsHTML(ctx.hole)}</span>${ctx.board && ctx.board.length ? `<span>Борд ${View.cardsHTML(ctx.board)}</span>` : ''}</div>` : '';
       const body = q.type === 'choice'
@@ -507,6 +573,7 @@ const UI = (() => {
       openSheet('coach');
       const input = $('input', el);
       const done = (value, label) => {
+        if (S.paused) return; // Pause means paused: answers wait too
         el.className = 'c-item c-ans';
         el.innerHTML = `${View.suitText(q.prompt)} — <b>${View.suitText(label)}</b>`;
         resolve(value);
@@ -516,17 +583,20 @@ const UI = (() => {
         e.preventDefault();
         const raw = input.value.trim().replace(',', '.').replace('%', '');
         const v = parseFloat(raw);
+        if (S.paused) return;
         if (!raw || !isFinite(v)) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); input.focus(); return; }
         const shown = input.value.trim().replace(/\s*%$/, '');
         done(v, shown + (q.unit === '%' ? '%' : q.unit ? ' ' + q.unit : ''));
       });
       $$('[data-o]', el).forEach((b) => b.addEventListener('click', () => { const o = opts[+b.dataset.o]; done(o.v, o.label); }));
       if (input && !mq('(pointer: coarse)')) setTimeout(() => input.focus({ preventScroll: true }), 30);
-      if (auto !== undefined && auto !== null) setTimeout(() => {
+      // the on-screen keyboard shrinks the sheet: keep the field in view
+      if (input) input.addEventListener('focus', () => setTimeout(() => { if (input.isConnected) input.scrollIntoView({ block: 'nearest' }); }, 300));
+      if (auto !== undefined && auto !== null) setTimeout(() => whenRunning(() => {
         if (!el.isConnected || !el.classList.contains('c-q')) return;
         if (form) { input.value = String(auto); form.requestSubmit(); }
         else { const k = opts.findIndex((o) => String(o.v) === String(auto)); ($(`[data-o="${Math.max(0, k)}"]`, el) || {}).click(); }
-      }, 0);
+      }), 0);
     });
   }
 
@@ -548,8 +618,7 @@ const UI = (() => {
     const b = $('.bubble', el);
     clearTimeout(el._bt);
     if (el._anim) el.classList.remove(el._anim);
-    b.textContent = r.bubble || r.text || '';
-    tog(b, 'acting', r.acting);
+    b.textContent = r.bubble || r.text || ''; // no styling from r.acting: noise copies must look the same
     b.classList.add('show');
     if (r.anim) { el._anim = 'a-' + r.anim; void el.offsetWidth; el.classList.add(el._anim); }
     el._bt = setTimeout(() => { b.classList.remove('show'); if (el._anim) el.classList.remove(el._anim); el._anim = null; }, Math.max(300, ms));
@@ -567,7 +636,7 @@ const UI = (() => {
         done = true; clearInterval(timer); el.classList.add('hidden'); el.onclick = null;
         resolve(v);
       };
-      el.onclick = (e) => { const b = e.target.closest('[data-look]'); if (b) finish(b.dataset.look); };
+      el.onclick = (e) => { const b = e.target.closest('[data-look]'); if (b && !S.paused) finish(b.dataset.look); };
       const timer = setInterval(() => {
         const t = U.now();
         if (!S.paused) left -= t - last;
@@ -577,7 +646,7 @@ const UI = (() => {
       }, 40);
       bar.style.transform = 'scaleX(1)';
       if (!mq('(pointer: coarse)')) $('[data-look="players"]', el).focus({ preventScroll: true });
-      if (auto) setTimeout(() => { if (!done) $(`[data-look="${auto}"]`, el).click(); }, 0);
+      if (auto) setTimeout(() => whenRunning(() => { if (!done) $(`[data-look="${auto}"]`, el).click(); }), 0);
     });
   }
 
@@ -668,7 +737,8 @@ const UI = (() => {
 
   return {
     mount, render, askAction, waitNext, askQuestion, askLook, coachClear, coachAdd, coachFb, review,
-    logReset, logStreet, logLine, bubble, collect, payout, deal, openSheet, closeSheet, setAmount,
-    get acting() { return !!act; }, get waitingNext() { return !!nextRes; },
+    logReset, logStreet, logLine, bubble, collect, payout, deal, openSheet, closeSheet, setAmount, holding,
+    sidePots, nice, quickSizes, defaultRaise,
+    get acting() { return !!act; }, get waitingNext() { return !!nextRes; }, get held() { return held(); },
   };
 })();

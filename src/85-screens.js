@@ -57,6 +57,7 @@ const Screens = (() => {
     ['read', 'Чтение соперника', 'Что у него, когда он ставит крупно'],
     ['tells', 'Теллы', 'Смотреть на борд или на соперников, когда открывается карта'],
   ];
+  const STYLE_COLS = ['VPIP', 'Рейз префлоп', 'Агрессия после флопа', 'Сброс на ставку', 'Блеф', 'Теллы'];
   const TABS = [['outs', 'Ауты'], ['rule', 'Правило 2 и 4'], ['odds', 'Шансы банка'], ['pos', 'Позиции'], ['types', 'Соперники']];
   const TAB_FOR = { preflop: 'pos', outs: 'outs', equity: 'rule', potodds: 'odds', action: 'odds', read: 'types' };
   const LEGEND = { raise: 'Рейз / 3-бет', in: 'Входит в диапазон', call: 'Колл', border: 'На границе: допустимо', out: 'Сброс' };
@@ -79,6 +80,7 @@ const Screens = (() => {
   // ---------- plumbing ----------
   function mount(html, acts) {
     const root = View.el(typo(html));
+    document.querySelectorAll('.toast-wrap .toast').forEach((t) => t.remove()); // game toasts must not cover the new screen
     document.getElementById('app').replaceChildren(root);
     window.scrollTo(0, 0);
     const h = root.querySelector('h1');
@@ -108,6 +110,7 @@ const Screens = (() => {
     };
     const summary = `Стол на ${U.nplural(s.players, 'игрока', 'игрока', 'игроков')}, стек ${s.startBB} BB.<br>` +
       (t.n ? `Верных ответов: ${pct(t)}% из ${t.n}.` : 'Точность появится после первых ответов.');
+    const primary = (id) => (id === 'learn' || t.n ? ' btn-primary' : ''); // first-timer: one call to action
     mount(`<main class="sc sc-menu">
       <section class="sc-rail"><div class="sc-felt">
         <div class="sc-fan" aria-hidden="true">${View.cardHTML(Cards.parse('As'))}${View.cardHTML(Cards.parse('Kh'))}</div>
@@ -118,7 +121,7 @@ const Screens = (() => {
       <section class="sc-modes">${MODES.map((m) => `<article class="panel sc-mode sc-mode-${m.id}">
         <header><span class="sc-chip" aria-hidden="true">${m.suit}</span><h2>${m.name}</h2></header>
         <p>${m.desc}</p><p class="sc-fact">${fact[m.id]}</p>
-        <button class="btn btn-primary" data-act="start" data-arg="${m.id}">${m.cta}</button></article>`).join('')}</section>
+        <button class="btn${primary(m.id)}" data-act="start" data-arg="${m.id}">${m.cta}</button></article>`).join('')}</section>
       <nav class="sc-nav" aria-label="Разделы"><button class="btn" data-act="settings">Настройки</button><button class="btn" data-act="stats">Статистика</button><button class="btn" data-act="cheat">Шпаргалка</button></nav>
       <section class="sc-how"><h2>Как играть</h2><ul>${HOW.map((h, i) => {
         const suit = '♠♥♦♣'[i];
@@ -127,7 +130,7 @@ const Screens = (() => {
     </main>`, {
       start: (mode) => opts.onStart && opts.onStart(mode),
       settings: () => settings({ onBack: () => menu(opts) }),
-      stats: () => stats({ onBack: () => menu(opts) }),
+      stats: () => stats({ onBack: () => menu(opts), onStart: opts.onStart }),
       cheat: () => cheatSheet(),
     });
   }
@@ -222,12 +225,29 @@ const Screens = (() => {
       v === null ? '<span class="sc-dim">—</span>' : `<span class="sc-meter"><i style="width:${v}%"></i></span>${v}%`, c.n];
   }), 2, 'sc-pos');
 
-  const mistakesHTML = (list) => (list.length ? `<ol class="sc-mlist">${list.map((m, i) => `<li><button class="sc-mrow" data-act="mistake" data-arg="${i}">
-      <span class="sc-mdate">${m.ts ? date(m.ts) : m.handNo != null ? 'Раздача ' + esc(m.handNo) : ''}</span><span class="sc-tag">${esc(Stats.CAT_RU[m.cat] || m.cat || 'Ошибка')}</span>
-      <span class="sc-mtitle">${txt(m.title || 'Ошибка')}</span></button></li>`).join('')}</ol>` : '<p class="sc-empty">Ошибок пока нет.</p>');
+  const catName = (c) => Stats.CAT_RU[c] || c || 'Ошибка';
+  // opts: byHand — «Раздача N» instead of the time; limit — rows shown before «Показать все»; empty — text for [].
+  function mistakesHTML(list, { byHand = false, limit = Infinity, empty = 'Ошибок пока нет.' } = {}) {
+    if (!list.length) return `<p class="sc-empty">${empty}</p>`;
+    const hand = (m) => (m.handNo != null ? 'Раздача ' + esc(m.handNo) : '');
+    const when = (m) => (byHand ? hand(m) || (m.ts ? date(m.ts) : '') : m.ts ? date(m.ts) : hand(m));
+    const counts = {};
+    for (const m of list) counts[catName(m.cat)] = (counts[catName(m.cat)] || 0) + 1;
+    const more = list.length > limit;
+    return `${more ? `<p class="sc-mcount">${Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${esc(c)}\u00a0— ${n}`).join(' · ')}</p>` : ''}
+      <ol class="sc-mlist">${list.map((m, i) => `<li${i >= limit ? ' hidden' : ''}><button class="sc-mrow" data-act="mistake" data-arg="${i}">
+      <span class="sc-mdate">${when(m)}</span><span class="sc-tag">${esc(catName(m.cat))}</span>
+      <span class="sc-mtitle">${txt(m.title || 'Ошибка')}</span></button></li>`).join('')}</ol>
+      ${more ? `<p><button class="btn btn-sm" data-act="more">Показать все (${list.length})</button></p>` : ''}`;
+  }
+  const showAll = (_, el) => { el.closest('.sc-sec').querySelectorAll('.sc-mlist li[hidden]').forEach((li) => { li.hidden = false; }); el.parentElement.remove(); };
 
-  function statsHTML(d) {
+  function statsHTML(d, opts = {}) {
     const t = d.total, played = d.sessions.filter((s) => s.n > 0).length;
+    if (!t.n && !d.mistakes.length && Stats.CATS.every((c) => !d.byCat[c].n)) {
+      return `<section class="panel sc-sec sc-center"><p class="sc-empty">Пока нет ответов. Сыграй несколько раздач — здесь появится твоя точность по категориям, позициям и сессиям.</p>
+        ${opts.onStart ? '<p><button class="btn btn-primary" data-act="start" data-arg="learn">Начать обучение</button></p>' : ''}</section>`;
+    }
     const weak = Stats.CATS.filter((c) => c !== 'tells' && d.byCat[c].n >= 5).sort((a, b) => pct(d.byCat[a]) - pct(d.byCat[b]))[0];
     return `<section class="panel sc-sec sc-overview">${t.n ? `<div class="sc-big">${pct(t)}%</div><div>
         <p class="sc-big-label">верных ответов</p><p class="sc-dim">${t.ok} из ${t.n}, ${U.nplural(played, 'сессия', 'сессии', 'сессий')}</p>
@@ -283,26 +303,29 @@ const Screens = (() => {
     ro.observe(box);
   }
 
-  function fillStats(box) {
+  function fillStats(box, opts) {
     const d = Stats.data();
-    box.innerHTML = typo(statsHTML(d));
-    chart(box.querySelector('.sc-chart'), d.sessions.filter((s) => s.n > 0).slice(-20));
+    box.innerHTML = typo(statsHTML(d, opts));
+    const c = box.querySelector('.sc-chart');
+    if (c) chart(c, d.sessions.filter((s) => s.n > 0).slice(-20));
   }
-  function wireStats(box) {
+  function wireStats(box, opts = {}) {
     onAct(box, {
+      start: (mode) => opts.onStart && opts.onStart(mode),
       mistake: (i) => mistake(Stats.data().mistakes[+i]),
       cheat: (tab) => cheatSheet(tab),
       reset: async () => {
         const yes = await modal('Сбросить статистику?', '<p>Удалятся все ответы, сессии и список ошибок. Вернуть их будет нельзя.</p>',
           { buttons: [{ label: 'Отмена', value: false }, { label: 'Сбросить', value: true, cls: 'btn-danger' }] });
-        if (yes) { Stats.reset(); fillStats(box); }
+        if (yes) { Stats.reset(); fillStats(box, opts); }
       },
     });
-    fillStats(box);
+    fillStats(box, opts);
   }
+  // opts: onBack(), onStart(mode) — the empty state offers «Начать обучение» when onStart is given.
   function stats(opts = {}) {
     const root = mount(`<main class="sc sc-stats">${header('Статистика')}<div class="sc-stats-body"></div></main>`, { back: () => opts.onBack && opts.onBack() });
-    wireStats(root.querySelector('.sc-stats-body'));
+    wireStats(root.querySelector('.sc-stats-body'), opts);
   }
   const statsModal = () => modal('Статистика', '<div class="sc-stats-body"></div>', { wide: true, onOpen: (body) => wireStats(body.firstElementChild) });
 
@@ -315,8 +338,9 @@ const Screens = (() => {
     rule: () => `<div class="sc-formula">
         <p><b>Одна карта</b> — ставка не олл-ин, ты увидишь только следующую карту:</p><p class="sc-eq">эквити ≈ ауты × 2</p>
         <p><b>Две карты</b> — олл-ин на флопе, ты увидишь и тёрн, и ривер:</p><p class="sc-eq">эквити ≈ ауты × 4</p>
-        <p>Больше 8 аутов — × 4 завышает шанс. Поправка:</p><p class="sc-eq">эквити ≈ ауты × 4 − (ауты − 8)</p></div>
-      ${table(['Ауты', 'Правило × 2', 'Точно, одна карта', 'Правило × 4', 'Точно, две карты'], DRAWS.map(([, o, p1, p2]) => [o, o * 2 + '%', p1 + '%', rule4(o) + '%', p2 + '%']))}
+        <p>Больше 8 аутов — × 4 завышает шанс. Поправка:</p><p class="sc-eq">эквити ≈ ауты × 4 −&nbsp;<span class="sc-nw">(ауты − 8)</span></p></div>
+      ${table(['Ауты', 'Правило × 2', 'Точно, одна карта', 'Правило × 4', 'Точно, две карты'], DRAWS.map(([, o, p1, p2]) => [o, o * 2 + '%', p1 + '%', rule4(o) + '%', p2 + '%']), 1, 'sc-d')}
+      ${table(['Ауты', '× 2 <small class="sc-inline">(точно)</small>', '× 4 <small class="sc-inline">(точно)</small>'], DRAWS.map(([, o, p1, p2]) => [o, `${o * 2}% <small class="sc-inline">(${p1}%)</small>`, `${rule4(o)}% <small class="sc-inline">(${p2}%)</small>`]), 1, 'sc-m')}
       <p class="sc-note"><b>Пример.</b> Флеш-дро и стрит-дро — 15 аутов, соперник на флопе пошёл олл-ин. Ты увидишь две карты: 15 × 4 = 60, поправка 15 − 8 = 7, итого 60 − 7 = 53%. Точное значение — 54%, правило почти не ошибается. Если бы ставка была не олл-ин, ты увидел бы одну карту: 15 × 2 = 30%.</p>`,
     odds: () => `<div class="sc-formula"><p>Сколько эквити нужно, чтобы колл окупался в долгую:</p>
         <p class="sc-eq">нужно % = колл ÷ (банк со ставкой соперника + колл) × 100</p></div>
@@ -326,8 +350,8 @@ const Screens = (() => {
       <p class="sc-note"><b>Вместе с правилом 2 и 4.</b> Флеш-дро на тёрне (9 аутов), соперник ставит банк: эквити 9 × 2 = 18%, нужно 33%, значит сброс.</p>`,
     pos: () => `<p class="sc-note">Первый рейз, когда до тебя все сбросили. Нажми на позицию, чтобы увидеть сетку рук.</p>
       ${table(['Позиция', 'Группа', 'Открывай рейзом (стол на 9)'], POSITIONS.map((p) => [
-        `<button class="sc-link sc-pos-btn" data-act="range" data-arg="${p}" data-title="Диапазон открытия: ${p}">${p}</button>`,
-        esc(group(p)), esc(openText(p)) + (POS_NOTE[p] ? `<small>${POS_NOTE[p]}</small>` : '')]), 9, 'sc-wide')}
+        `<button class="sc-link sc-pos-btn" data-act="range" data-arg="${p}" data-title="Диапазон открытия: ${p}">${p}</button><small class="sc-m">${esc(group(p))}</small>`,
+        esc(group(p)), esc(openText(p)) + (POS_NOTE[p] ? `<small>${POS_NOTE[p]}</small>` : '')]), 9, 'sc-wide sc-open')}
       <p class="sc-note">«77+» — 77 и все пары старше, «AJs+» — AJs, AQs, AKs. s — одномастные, o — разномастные. За столом меньше 9 человек ранние позиции убираются: за 6 первым ходит LJ, играй его диапазон.</p>
       <h3>Против рейза</h3>
       <ul class="sc-rules">
@@ -338,8 +362,10 @@ const Screens = (() => {
       </ul>
       <p><button class="btn btn-sm" data-act="range" data-arg="vsRaise" data-title="Против рейза">Сетка против рейза</button>
         <button class="btn btn-sm" data-act="range" data-arg="vs3bet" data-title="Против рейза и ререйза">Сетка против 3-бета</button></p>`,
-    types: () => `${table(['Стиль', 'VPIP', 'Рейз префлоп', 'Агрессия после флопа', 'Сброс на ставку', 'Блеф', 'Теллы'],
-        Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return [`<b>${r[0]}</b><small>${r[1]}</small>`, ...r.slice(2, 8)]; }), 9, 'sc-wide')}
+    types: () => `${table(['Стиль', ...STYLE_COLS],
+        Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return [`<b>${r[0]}</b><small>${r[1]}</small>`, ...r.slice(2, 8)]; }), 9, 'sc-wide sc-d')}
+      <div class="sc-m sc-cards">${Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return `<div class="sc-card"><b>${r[0]}</b> <small>${r[1]}</small>
+        <dl>${STYLE_COLS.map((c, i) => `<div><dt>${c}</dt><dd>${r[i + 2]}</dd></div>`).join('')}</dl></div>`; }).join('')}</div>
       <p class="sc-note">VPIP — как часто игрок добровольно вкладывает фишки до флопа. Стиль соперника подписывается после 20 раздач с ним.</p>
       <h3>Как играть против</h3>
       <dl class="sc-vs">${Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return `<dt>${r[0]}</dt><dd>${r[8]}</dd>`; }).join('')}</dl>`,
@@ -350,16 +376,22 @@ const Screens = (() => {
     const body = `<div class="sc-tabs" role="tablist">${TABS.map(([id, label]) =>
       `<button class="sc-tab" role="tab" data-act="tab" data-arg="${id}" aria-selected="${id === cur}">${label}</button>`).join('')}</div>
       ${TABS.map(([id]) => `<section class="sc-pane" data-pane="${id}" role="tabpanel"${id === cur ? '' : ' hidden'}>${PANES[id]()}</section>`).join('')}`;
+    // On phones the tabs are one scrolling row: keep the selected one in view.
+    const reveal = (root) => { const t = root.querySelector('.sc-tab[aria-selected="true"]'); if (t && t.scrollIntoView) t.scrollIntoView({ block: 'nearest', inline: 'nearest' }); };
     return modal('Шпаргалка', body, {
       wide: true,
-      onOpen: (root) => onAct(root, {
-        tab: (id) => {
-          root.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== id; });
-          root.querySelectorAll('.sc-tab').forEach((b) => b.setAttribute('aria-selected', b.dataset.arg === id));
-          root.closest('.modal').scrollTop = 0;
-        },
-        range: (key, el) => rangeModal(key, el.dataset.title),
-      }),
+      onOpen: (root) => {
+        reveal(root);
+        onAct(root, {
+          tab: (id) => {
+            root.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== id; });
+            root.querySelectorAll('.sc-tab').forEach((b) => b.setAttribute('aria-selected', b.dataset.arg === id));
+            root.closest('.modal').scrollTop = 0;
+            reveal(root);
+          },
+          range: (key, el) => rangeModal(key, el.dataset.title),
+        });
+      },
     });
   }
 
@@ -404,20 +436,24 @@ const Screens = (() => {
         ${won ? `<p class="sc-medal" aria-hidden="true">1</p><h1 class="sc-place">Победа! Ты выиграл турнир</h1>
           <p class="sc-sub">Все фишки стола у тебя — за ${U.nplural(hands, 'раздачу', 'раздачи', 'раздач')}.</p>`
         : `<h1 class="sc-place">Ты занял ${place}-е место из ${total}</h1>
-          <p class="sc-sub">Раздач сыграно: ${hands}. Разбери ошибки ниже — так быстрее всего растёт результат.</p>`}
+          <p class="sc-sub">Раздач сыграно: ${hands}. ${mistakes.length ? 'Разбери ошибки ниже — так быстрее всего растёт результат.' : 'Ошибок не было — отличная игра.'}</p>`}
       </div></section>
-      <div class="sc-actions"><button class="btn btn-primary" data-act="again">Сыграть ещё турнир</button><button class="btn" data-act="menu">В меню</button></div>
+      <div class="sc-actions"><button class="btn btn-primary" data-act="again">Сыграть ещё турнир</button><button class="btn" data-act="menu">В меню</button>
+        <button class="btn" data-act="cheat">Шпаргалка</button><button class="btn" data-act="stats">Статистика</button></div>
       <div class="sc-cols">
         <section class="panel sc-sec"><h2>Точность в турнире</h2>
           ${t.n ? `<p class="sc-dim">Верных ответов: ${pct(t)}%, ${t.ok} из ${t.n}.</p>` : ''}${barsHTML(byCat, true)}</section>
         <section class="panel sc-sec"><h2>Вылеты</h2>${elim.length ? `<ol class="sc-elim">${elim.map((e) => `<li><span class="sc-elim-place">${esc(e.place)}-е</span>
           <span>${esc(e.name)}</span><span class="sc-dim">раздача ${esc(e.hand)}</span></li>`).join('')}</ol>` : '<p class="sc-empty">Никто не вылетел.</p>'}</section>
       </div>
-      <section class="panel sc-sec"><h2>Ошибки турнира</h2>${mistakesHTML(mistakes)}</section>
+      <section class="panel sc-sec"><h2>Ошибки турнира</h2>${mistakesHTML(mistakes, { byHand: true, limit: 5, empty: 'Ошибок не было.' })}</section>
     </main>`, {
       again: () => opts.onAgain && opts.onAgain(),
       menu: () => opts.onMenu && opts.onMenu(),
       mistake: (i) => mistake(mistakes[+i]),
+      more: showAll,
+      cheat: () => cheatSheet(),
+      stats: () => statsModal(),
     });
   }
 

@@ -119,11 +119,11 @@
     assert.strictEqual(big.outs.total, 15);
     assert.deepStrictEqual(big.outs.draws.map((d) => [d.type, d.n]), [['flush', 9], ['oesd', 8]]);
     assert.deepStrictEqual(big.outs.dirtyList.map((d) => [Cards.str(d.c), d.code]), [['K♥', 'pair']]);
-    assert.ok(ck(big, 'outs', 14).lines.includes('Всего: 9 + 8 − 2 (эти карты посчитаны дважды) = 15 аутов.'));
+    assert.ok(ck(big, 'outs', 14).lines.includes('Всего: 9 + 8 − 2 (4♥, 9♥: эти карты посчитаны дважды) = 15 аутов.'));
     const fg = spotOf({ holes: { 0: '9h 8h' }, board: 'Qh Tc 2h' }, HU(100)).spot;
     assert.strictEqual(fg.correctOuts, 12);
     assert.deepStrictEqual(fg.outs.draws.map((d) => [d.type, d.n]), [['flush', 9], ['gutshot', 4]]);
-    assert.ok(ck(fg, 'outs', 12).lines.includes('Всего: 9 + 4 − 1 (эти карты посчитаны дважды) = 12 аутов.'));
+    assert.ok(ck(fg, 'outs', 12).lines.includes('Всего: 9 + 4 − 1 (J♥: эта карта посчитана дважды) = 12 аутов.'));
   });
 
   test('coach: set 2, two overcards 6, one pair → two pair/trips 5', () => {
@@ -281,15 +281,15 @@
     const r1 = Coach.realEquity(near.spot, near.hand);
     assert.strictEqual(r1.kind, 'realEquity');
     assert.strictEqual(r1.verdict, 'info');
-    assert.strictEqual(r1.title, 'ℹ️ По правилу: 18%. Реально против K♠Q♠ (Игорь): 20,0%.');
+    assert.strictEqual(r1.title, 'ℹ️ Флоп: по правилу 18%. Реально против K♠Q♠ (Игорь): 20,0%.');
     assert.deepStrictEqual(r1.lines, ['Правило 2 и 4 работает: разница всего 2 п.п.']);
     const low = spotOf({ holes: { 0: '7h 6h', 1: 'Ah Qh' }, board: 'Kh 9h 2c' }, HU(100));
     const r2 = Coach.realEquity(low.spot, low.hand);
-    assert.strictEqual(r2.title, 'ℹ️ По правилу: 18%. Реально против A♥Q♥ (Игорь): 13,3%.');
-    assert.deepStrictEqual(r2.lines, ['Реально меньше: часть аутов не работает (Q♥, A♥ — у соперника на руках; 2♥, 3♥, 4♥, 5♥, 8♥, 10♥, J♥ не спасают: у соперника всё равно рука сильнее).']);
+    assert.strictEqual(r2.title, 'ℹ️ Флоп: по правилу 18%. Реально против A♥Q♥ (Игорь): 13,3%.');
+    assert.deepStrictEqual(r2.lines, ['Реально меньше: часть аутов не работает (Q♥, A♥ — у соперника на руках; 2♥, 3♥, 4♥, 5♥, 8♥, 10♥, J♥ не спасают: с ними у соперника рука становится сильнее твоей).']);
     const high = spotOf({ holes: { 0: 'Ah Kh', 1: 'Ks Qd' }, board: '9h 5h 2c' }, HU(100));
     const r3 = Coach.realEquity(high.spot, high.hand);
-    assert.strictEqual(r3.title, 'ℹ️ По правилу: 18%. Реально против K♠Q♦ (Игорь): 95,6%.');
+    assert.strictEqual(r3.title, 'ℹ️ Флоп: по правилу 18%. Реально против K♠Q♦ (Игорь): 95,6%.');
     assert.ok(r3.lines[0].startsWith('Реально больше'));
     U.seed(3);
     const made = spotOf({ holes: { 0: 'Ad Tc' }, board: 'Ac 7d 2s' }, HU(100));
@@ -301,7 +301,6 @@
     const big = spotOf({ styles: { 1: 'rock' }, holes: { 0: 'Ah Qh', 1: 'Ks Kd' }, board: 'Kh 7c 2d' }, HU(100));
     const rq = Coach.readQuestion(big.hand, 0, big.table);
     assert.deepStrictEqual([rq.bettor, rq.truth, rq.sizeFrac, rq.street], [1, 'strong', 1, 'flop']);
-    assert.strictEqual(rq.truth, Bots.classifyHolding(L('Ks Kd'), L('Kh 7c 2d')));
     assert.deepStrictEqual(rq.options.map((o) => o.label), ['Очень сильная рука', 'Средняя рука', 'Дро', 'Блеф']);
     const small = spotOf({ holes: { 0: 'Ah Qh' }, board: 'Kh 7c 2d' }, HU(50));
     assert.strictEqual(Coach.readQuestion(small.hand, 0, small.table), null);
@@ -333,7 +332,7 @@
     assert.strictEqual(mq.truth, 'draw');
     const mr = Coach.readReview(mq, 'draw', marina.hand, marina.table, {});
     assert.strictEqual(mr.verdict, 'correct');
-    assert.strictEqual(mr.lines[1], 'Марина играет 45% раздач и повышает префлоп в 30% раздач — похоже, это лузовый агрессивный игрок: часто ставит крупно с чем угодно.');
+    assert.strictEqual(mr.lines[1], 'Марина играет 45% раздач и повышает префлоп в 30% раздач — по первым 20 раздачам похоже, это лузовый агрессивный игрок: часто ставит крупно с чем угодно.');
     assert.strictEqual(mr.lines[mr.lines.length - 1], 'На самом деле у Марины: 9♠8♠ — старшая карта: король + флеш-дро (дро).');
   });
 
@@ -345,7 +344,7 @@
     const h = Coach.lookHint([fake, weak, honest], table, 'flop');
     assert.strictEqual(h.kind, 'tells');
     assert.strictEqual(h.verdict, 'mistake');
-    assert.deepStrictEqual(h.lines, ['Ты смотрел на борд. В этот момент Игорь бросает быстрый взгляд на свои фишки — это часто сигнал, что флоп попал. Смотри на соперников, борд никуда не денется.']);
+    assert.deepStrictEqual(h.lines, ['Пока ты смотрел на борд, ты пропустил реакцию: Игорь бросает быстрый взгляд на свои фишки — это часто сигнал, что флоп попал. Смотри на соперников, борд никуда не денется.']);
     assert.strictEqual(Coach.lookHint([weak], table, 'turn').title, '❌ Теллы: ты смотрел на борд, когда открывался тёрн.');
     assert.strictEqual(Coach.lookHint([fake, { ...honest, random: true }], table, 'river'), null);
     assert.strictEqual(Coach.lookHint([], table, 'flop'), null);
@@ -475,7 +474,7 @@
     const s = spotOf({ n: 3, holes: { 0: 'Qs Jd', 1: 'Kd Qc', 2: '7d 7c' }, board: 'Ks 7s 2s' }, MW(100));
     assert.deepStrictEqual([s.spot.correctOuts, s.spot.ruleEq], [1, 2]);
     const r = Coach.realEquity(s.spot, s.hand);
-    assert.strictEqual(r.title, 'ℹ️ По правилу: 2%. Реально против 7♦7♣ (Марина) и K♦Q♣ (Игорь): 20,9%.');
+    assert.strictEqual(r.title, 'ℹ️ Флоп: по правилу 2%. Реально против 7♦7♣ (Марина) и K♦Q♣ (Игорь): 20,9%.');
     assert.ok(r.lines[0].startsWith('Реально больше: против этих рук выигрывают и карты, которые не вошли в подсчёт: 3♠, 4♠, '), r.lines[0]);
     const ahead = spotOf({ holes: { 0: 'Ah Kh', 1: 'Ks Qd' }, board: '9h 5h 2c' }, HU(100));
     assert.strictEqual(Coach.realEquity(ahead.spot, ahead.hand).lines[0], 'Реально больше: ты выигрываешь и без попадания — сейчас твоя рука сильнее.');
@@ -484,7 +483,7 @@
     assert.ok(!ck(none, 'outs', 0).lines.some((l) => l.includes('все ауты чистые')));
     const st = spotOf({ styles: { 1: 'station' }, holes: { 0: 'Ah Kh' }, board: '9h 5h 2c' }, ['raise:50', 'call', 'next']).spot;
     assert.strictEqual(act(st, 'raise').verdict, 'mistake');
-    assert.ok(act(st, 'check').lines.includes('Этот соперник почти никогда не сбрасывает — полублеф против него не сработает, бери бесплатную карту.'));
+    assert.ok(act(st, 'check').lines.includes('Этот соперник почти никогда не сбрасывает — полублеф против него не сработает. У тебя 9 аутов — около 18% попасть на следующей карте: без сбросов соперника ставка только раздувает банк, а промахиваешься ты чаще. Бери бесплатную карту.'));
     // multiway, nobody bet: name the opponent the advice is about (the one least likely to fold)
     const mwFree = spotOf({ n: 3, styles: { 1: 'rock', 2: 'reg' }, holes: { 0: 'Ah Kh' }, board: '9h 5h 2c' }, [...MW(100).slice(0, 4), 'check']).spot;
     assert.ok(act(mwFree, 'check').lines.includes('Самый цепкий из соперников, Марина, иногда сбрасывает на агрессию — ставка-полублеф допустима, но бесплатная карта надёжнее.'));
@@ -524,5 +523,128 @@
     }
     assert.ok(withOuts > 150 && checked > 1000, `${withOuts} spots with outs, ${checked} improving cards`);
     U.seed(null);
+  });
+
+  // ---------- QA findings (fixer round) ----------
+  const TURN = (bet) => ['raise:50', 'call', 'next', 'check', 'check', 'next', 'check', `raise:${bet}`]; // pot 100 on the turn
+  const RIVER = (bet, re) => ['raise:50', 'call', 'next', 'check', 'check', 'next', 'check', 'check', 'next', `raise:${bet}`, `raise:${re}`];
+
+  test('fix: real equity names an opponent who already has a better made hand; street in the title', () => {
+    const s = spotOf({ holes: { 0: '7c 8s', 1: 'Ts 8d' }, board: '2h Qd Js 9h' }, TURN(50));
+    assert.strictEqual(s.spot.cardsToSee, 1);
+    const r = Coach.realEquity(s.spot, s.hand);
+    assert.ok(r.title.startsWith('ℹ️ Тёрн: по правилу 8%.'), r.title);
+    assert.strictEqual(r.lines[0], 'Реально меньше: часть аутов не работает (10♠ — у соперника на руках; у соперника уже стрит до дамы — с 10♥, 10♦, 10♣ только делишь банк).');
+  });
+
+  test('fix: a made hand with a real draw asks the outs questions; the verdict stays on the made-hand estimate', () => {
+    U.seed(4);
+    const s = spotOf({ holes: { 0: 'Kh Qh' }, board: 'Kc 7h 2h' }, HU(100)).spot;
+    assert.strictEqual(s.kind, 'made');
+    assert.ok(s.drawToo);
+    assert.deepStrictEqual(s.questions, ['outs', 'cards', 'equity', 'potodds']);
+    assert.ok(act(s, 'call').lines.some((l) => l.startsWith(`По правилу 2 и 4 одни улучшения (${s.correctOuts} аутов) дают ${s.ruleEq}%, но ты и так часто впереди`)));
+    assert.deepStrictEqual(spotOf({ holes: { 0: 'Kh Qc' }, board: 'Kc 7h 2d' }, HU(100)).spot.questions, ['potodds']); // no draw
+    U.seed(null);
+  });
+
+  test('fix: accepted overcard outs make the call acceptable, not a mistake', () => {
+    const s = spotOf({ holes: { 0: 'As Kd' }, board: 'Qc Jh 5d' }, HU(30)).spot; // needs 30/160 = 18.75%
+    assert.deepStrictEqual(s.acceptedOuts, [4, 10]);
+    assert.strictEqual(ck(s, 'equity', 20).verdict, 'correct');
+    const a = act(s, 'call');
+    assert.strictEqual(a.verdict, 'acceptable');
+    assert.ok(a.lines.includes('С оверкартами (10 аутов) — 20% ≥ 19%: колл тоже допустим, но пара из оверкарты может и не выиграть, а без них у тебя только 8%.'), a.lines.join('\n'));
+    assert.strictEqual(act(spotOf({ holes: { 0: 'As Kd' }, board: 'Qc Jh 5d' }, HU(100)).spot, 'call').verdict, 'mistake'); // big bet: no overcards
+  });
+
+  test('fix: dirty outs — a low two-card flush, set outs on a flush board, straight-board danger', () => {
+    const low = Coach.computeOuts(L('5h 4h'), L('Ah Th 8c'));
+    assert.ok(low.dirtyList.filter((d) => d.code === 'nonnut').length >= 7);
+    const nine = Coach.computeOuts(L('8h 7h'), L('6h 5h Kc'));       // 8-high flush: not flagged
+    assert.ok(!nine.dirtyList.some((d) => d.code === 'nonnut'));
+    const mono = Coach.computeOuts(L('9d 9c'), L('Qs 8s Ts'));
+    assert.strictEqual(mono.clean, 0);
+    assert.deepStrictEqual(mono.dirtyList.filter((d) => d.code === 'flush2').map((d) => Cards.str(d.c)).sort(), ['9♠', '9♥']);
+    const mw = spotOf({ n: 3, holes: { 0: '9d 9c' }, board: 'Qs 8s Ts' }, MW(100)).spot;
+    assert.strictEqual(ck(mw, 'outs', 0).verdict, 'correct');
+    const str = Coach.computeOuts(L('Kh 2c'), L('Kd Js Tc 9h'));     // trips K: board K J T 9 (+K) — any Q makes a straight
+    assert.ok(str.dirtyList.some((d) => d.code === 'straight2'), JSON.stringify(str.dirtyList));
+  });
+
+  test('fix: numeric answers are strict and echoed in Russian format', () => {
+    const s = spotOf({ holes: { 0: 'Ah Kh' }, board: '9h 5h 2c' }, HU(100)).spot;
+    assert.strictEqual(ck(s, 'outs', '12abc').title, '❌ Ауты: ты ничего не указал, правильно 9.');
+    assert.strictEqual(ck(s, 'outs', '0x10').verdict, 'mistake');
+    assert.strictEqual(ck(s, 'outs', 13.5).title, '❌ Ауты: ты указал 13,5, правильно 9.');
+    assert.strictEqual(ck(s, 'outs', '9,5').verdict, 'correct');
+    assert.strictEqual(ck(s, 'potodds', 1e20).title, '❌ Шансы банка: ты указал больше миллиона%, правильно 33%.');
+    assert.strictEqual(ck(s, 'outs', 10).title, '✅ Ауты: 9 — верно (ты указал 10, допуск ±1).');
+  });
+
+  test('fix: no pair of your own on the river — folding is never a mistake; board pair is shared', () => {
+    for (const seed of [1, 2, 3]) {
+      U.seed(seed);
+      const s = spotOf({ styles: { 1: 'maniac' }, holes: { 0: 'Kc 9d' }, board: '3s 5h 4c Ts 3h' }, RIVER(60, 200)).spot;
+      assert.strictEqual(s.made.strength, 'none');
+      assert.strictEqual(act(s, 'fold').verdict, 'correct');
+      assert.strictEqual(act(s, 'call').verdict, 'mistake'); // unrevealed bettor, big raise
+      assert.strictEqual(act(s, 'fold').lines[0], 'Твоя рука: только старшая карта — король (пара троек на борде общая).');
+    }
+    U.seed(null);
+    assert.strictEqual(Coach.madeInfo(L('6h 6c'), L('4d Qs 7d 4h')).ru, 'пара шестёрок (слабая пара) + пара четвёрок на борде — общая');
+  });
+
+  test('fix: multiway value raise with two pair is fine; a raise mistake is explained', () => {
+    U.seed(3);
+    const s = spotOf({ n: 3, styles: { 1: 'station', 2: 'maniac' }, holes: { 0: 'Ks Jh' }, board: 'Js Kd 9h' }, MW(150)).spot;
+    assert.notStrictEqual(s.verdicts.raise, 'mistake');
+    const weak = spotOf({ n: 3, styles: { 1: 'rock', 2: 'rock' }, holes: { 0: 'Ah 9c' }, board: 'As Kd Qh' }, MW(150)).spot;
+    assert.strictEqual(weak.verdicts.raise, 'mistake');
+    assert.ok(act(weak, 'raise').lines.some((l) => /Рейз (за ценностью нужен|с рукой, которой не хватает)/.test(l)));
+    U.seed(null);
+  });
+
+  test('fix: read question truth uses the coach vocabulary; adjacent answers are ⚠️', () => {
+    const g = spotOf({ styles: { 1: 'reg' }, holes: { 0: '8s 8d', 1: 'Qc Td' }, board: 'Kh Ah 2d' }, HU(100));
+    assert.strictEqual(Coach.readQuestion(g.hand, 0, g.table).truth, 'draw');      // gutshot = draw
+    const tp = spotOf({ styles: { 1: 'reg' }, holes: { 0: '8s 8d', 1: 'Jh Kd' }, board: '9d 4s Jc' }, HU(100));
+    assert.strictEqual(Coach.readQuestion(tp.hand, 0, tp.table).truth, 'medium');   // top pair = medium, as madeInfo
+    const w = spotOf({ styles: { 1: 'reg' }, holes: { 0: '8s 8d', 1: '3h 3c' }, board: 'Kd 9s 7c' }, HU(100));
+    const wq = Coach.readQuestion(w.hand, 0, w.table);
+    assert.deepStrictEqual([wq.truth, wq.alt], ['bluff', 'medium']);
+    const rv = Coach.readReview(wq, 'medium', w.hand, w.table, {});
+    assert.strictEqual(rv.verdict, 'acceptable');
+    assert.ok(rv.ok);
+  });
+
+  test('fix: read review — random tells are flagged, huge bets readable, blinds commented, HUD types by absolute PFR', () => {
+    const big = spotOf({ styles: { 1: 'maniac' }, holes: { 0: 'Ah Qh', 1: 'Js 4c' }, board: 'Kh 7c 2d' }, HU(100));
+    const rq = Coach.readQuestion(big.hand, 0, big.table);
+    const tell = { seat: 1, shown: 'strength', truth: 'weak', acting: false, random: true, text: 'замирает', meaning: 'это часто сигнал, что флоп попал' };
+    const rv = Coach.readReview(rq, 'bluff', big.hand, big.table, { tellsSeen: [tell] });
+    assert.ok(rv.lines.includes('Телл: Игорь замирает — это часто сигнал, что флоп попал (на деле эта реакция была случайной — теллы надёжны не на 100%).'));
+    assert.ok(rv.lines.includes('Реакции Игоря не совпадали с картами — на теллы этого игрока лучше не опираться.'));
+    assert.ok(Coach.readReview({ ...rq, sizeFrac: 25.2 }, 'bluff', big.hand, big.table, {}).lines.some((l) => l.startsWith('Размер ставки: в 25 раз больше банка')));
+    const type = (hud) => { big.table.players[1].hud = hud; return Coach.readReview(rq, 'bluff', big.hand, big.table, {}).lines[1]; };
+    assert.ok(type({ hands: 20, vpip: 3, pfr: 2 }).includes('тайтовый пассивный'));    // rock 15/10
+    assert.ok(type({ hands: 20, vpip: 4, pfr: 3 }).includes('тайтовый агрессивный'));  // reg 20/15
+    assert.ok(type({ hands: 20, vpip: 10, pfr: 1 }).includes('лузовый пассивный'));     // station 50/5
+    assert.ok(type({ hands: 20, vpip: 9, pfr: 5 }).includes('лузовый агрессивный'));   // maniac 45/25
+    assert.ok(type({ hands: 10, vpip: 0, pfr: 0 }).startsWith('Статистики у Игоря пока мало'));
+    assert.ok(type({ hands: 14, vpip: 0, pfr: 0 }).includes('тайтовый пассивный'));    // 0/0 is not aggressive
+  });
+
+  test('fix: Russian texts — female pronoun, one card «не спасает», equity without the 9+ correction', () => {
+    const f = spotOf({ n: 3, names: ['Ты', 'Игорь', 'Ольга'], styles: { 1: 'reg', 2: 'station' }, holes: { 0: '6h 5d' }, board: '8d Jd 4c' }, [...MW(100).slice(0, 4), 'check']).spot;
+    assert.deepStrictEqual([f.villain.name, f.verdicts.raise], ['Ольга', 'mistake']);
+    assert.ok(act(f, 'raise').lines.some((l) => l.includes('против неё')));
+    const allin = spotOf({ styles: { 1: 'maniac' }, holes: { 0: 'Ah Kh' }, board: '9h 5h 2c' }, ['raise:50', 'call', 'next', 'check', 'raise:1950']).spot;
+    assert.strictEqual(allin.cardsToSee, 2);
+    const e = ck(allin, 'equity', 40, { outs: 10 });
+    assert.strictEqual(e.title, '❌ Эквити: ты указал 40% — это 10 × 4 без поправки.');
+    assert.strictEqual(ck(allin, 'equity', 38, { outs: 10 }).verdict, 'correct'); // within ±3 of 35
+    const o = Coach.computeOuts(L('2d 3s'), L('3h 8h 8c'));
+    assert.ok(o.draws.find((d) => d.type === 'trips').text.includes('фулл-хаус'));
   });
 })();
