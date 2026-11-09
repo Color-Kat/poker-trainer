@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1410">
+<meta name="description" content="Тренажёр покера (No-Limit Texas Hold'em): ауты, эквити, шансы банка, позиции, чтение соперников. Работает офлайн, один HTML-файл.">
+<title>Тренажёр покера — No-Limit Hold'em</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f5a3a'/%3E%3Ctext x='32' y='47' font-size='42' text-anchor='middle' fill='%23f1cf7a'%3E%E2%99%A0%3C/text%3E%3C/svg%3E">
+<style>
+/* ===== 00-base.css ===== */
+/* Design tokens + base components shared by all screens.
+   Direction: evening card club — bottle-green baize, mahogany rail, brass accents, ivory cards. */
+:root {
+  --bg: #0a120e;
+  --bg-2: #0f1a15;
+  --panel: #142019;
+  --panel-2: #1a2a22;
+  --panel-3: #22352b;
+  --line: rgba(241, 207, 122, 0.14);
+  --line-soft: rgba(255, 255, 255, 0.07);
+
+  --felt: #136b45;
+  --felt-dark: #0a4a2f;
+  --felt-edge: #06331f;
+  --rail: #3b2213;
+  --rail-light: #6b3f22;
+
+  --brass: #d6aa52;
+  --brass-hi: #f1cf7a;
+  --brass-dim: #8f7134;
+
+  --text: #eef2ec;
+  --text-dim: #a3b5aa;
+  --text-faint: #6f8378;
+
+  --ok: #42d27f;
+  --ok-bg: rgba(66, 210, 127, 0.12);
+  --warn: #f2b545;
+  --warn-bg: rgba(242, 181, 69, 0.13);
+  --bad: #ff6b6b;
+  --bad-bg: rgba(255, 107, 107, 0.12);
+  --info: #74b9ff;
+  --info-bg: rgba(116, 185, 255, 0.12);
+
+  --card-bg: #fbf7ee;
+  --card-edge: #d9d0bd;
+  --card-red: #c8102e;
+  --card-black: #16181d;
+  --card-back-1: #7d1424;
+  --card-back-2: #5a0d19;
+
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-display: Georgia, "Times New Roman", "Noto Serif", serif;
+
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 10px 30px rgba(0, 0, 0, 0.5);
+
+  --speed: 1; /* animation speed multiplier, set from settings: 1.6 slow, 1 normal, 0.5 fast */
+  --cw: 46px; /* playing card width; height = 1.4 × width */
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: radial-gradient(1200px 700px at 50% -10%, #15281f 0%, var(--bg) 60%) fixed, var(--bg);
+  color: var(--text);
+  font: 15px/1.45 var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+#app { min-height: 100%; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 700; letter-spacing: 0.01em; margin: 0 0 0.5em; }
+h1 { font-size: 30px; color: var(--brass-hi); }
+h2 { font-size: 22px; color: var(--brass-hi); }
+h3 { font-size: 17px; color: var(--brass); }
+p { margin: 0 0 0.7em; }
+a { color: var(--brass-hi); }
+.dim { color: var(--text-dim); }
+.faint { color: var(--text-faint); }
+.hidden { display: none !important; }
+:focus-visible { outline: 2px solid var(--brass-hi); outline-offset: 2px; }
+
+/* ---------- buttons ---------- */
+.btn {
+  appearance: none; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--panel-2); color: var(--text);
+  font: 600 15px/1 var(--font-ui); padding: 11px 16px; min-height: 42px;
+  cursor: pointer; user-select: none; transition: background .15s, border-color .15s, transform .08s, opacity .15s;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn:hover { background: var(--panel-3); border-color: rgba(241, 207, 122, 0.3); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-primary { background: linear-gradient(180deg, var(--brass-hi), var(--brass)); color: #23180a; border-color: #a67f2e; }
+.btn-primary:hover { background: linear-gradient(180deg, #f7dc96, #dcb25f); }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn-ghost:hover { background: var(--panel-2); color: var(--text); }
+.btn-danger { background: #3a1517; border-color: #6b2226; color: #ffd0d0; }
+.btn-ok { background: #123d27; border-color: #1f6a43; color: #c9f7dc; }
+.btn-sm { min-height: 32px; padding: 7px 11px; font-size: 13px; border-radius: var(--r-sm); }
+
+/* ---------- form controls ---------- */
+input[type="number"], input[type="text"], select {
+  background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-sm);
+  font: 600 16px var(--font-ui); padding: 9px 10px; min-height: 40px; width: 100%;
+}
+input[type="number"] { -moz-appearance: textfield; }
+input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="range"] { width: 100%; accent-color: var(--brass); }
+input[type="checkbox"] { accent-color: var(--brass); width: 18px; height: 18px; }
+label { cursor: pointer; }
+
+/* ---------- panels ---------- */
+.panel { background: linear-gradient(180deg, var(--panel), var(--bg-2)); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-1); }
+
+/* ---------- verdict colours (coach feedback) ---------- */
+.v-correct { color: var(--ok); }
+.v-acceptable { color: var(--warn); }
+.v-mistake { color: var(--bad); }
+.v-info { color: var(--info); }
+.fb { border-left: 3px solid var(--line); background: var(--panel-2); border-radius: var(--r-sm); padding: 10px 12px; margin: 8px 0; }
+.fb.correct { border-color: var(--ok); background: var(--ok-bg); }
+.fb.acceptable { border-color: var(--warn); background: var(--warn-bg); }
+.fb.mistake { border-color: var(--bad); background: var(--bad-bg); }
+.fb.info { border-color: var(--info); background: var(--info-bg); }
+.fb-title { font-weight: 700; margin-bottom: 4px; }
+.fb-line { color: var(--text); margin: 3px 0; }
+.s-red { color: #ff7083; }
+.s-black { color: inherit; }
+
+/* ---------- playing card ---------- */
+.pcard {
+  --h: calc(var(--cw) * 1.4);
+  position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  width: var(--cw); height: var(--h); border-radius: calc(var(--cw) * 0.12);
+  background: var(--card-bg); border: 1px solid var(--card-edge);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  color: var(--card-black); font-family: var(--font-display); line-height: 1; user-select: none; flex: none;
+}
+.pcard.red { color: var(--card-red); }
+.pcard .pc-r { font-size: calc(var(--cw) * 0.46); font-weight: 700; letter-spacing: -0.04em; }
+.pcard .pc-s { font-size: calc(var(--cw) * 0.44); margin-top: calc(var(--cw) * 0.02); }
+.pcard .pc-c { position: absolute; top: calc(var(--cw) * 0.06); left: calc(var(--cw) * 0.09); font-size: calc(var(--cw) * 0.22); font-weight: 700; line-height: 0.95; text-align: center; }
+.pcard.back {
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.07) 0 3px, transparent 3px 7px),
+    repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.07) 0 3px, transparent 3px 7px),
+    linear-gradient(160deg, var(--card-back-1), var(--card-back-2));
+  border: 2px solid #f3ead6;
+}
+.pcard.empty { background: rgba(0, 0, 0, 0.18); border: 1px dashed rgba(255, 255, 255, 0.18); box-shadow: none; }
+.pcard.dim { filter: brightness(0.55) saturate(0.6); }
+.pcard.hl { box-shadow: 0 0 0 2px var(--brass-hi), 0 0 14px rgba(241, 207, 122, 0.7); }
+.pcard.sm { --cw: 30px; }
+.pcard.xs { --cw: 22px; }
+.cards-row { display: inline-flex; gap: 4px; vertical-align: middle; }
+
+/* ---------- modal & toast ---------- */
+.modal-back {
+  position: fixed; inset: 0; z-index: 100; background: rgba(3, 8, 6, 0.72); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 16px; animation: fadeIn .15s ease;
+}
+.modal {
+  width: min(760px, 100%); max-height: calc(100vh - 32px); overflow: auto;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel)); border: 1px solid var(--line);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-2); padding: 20px;
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.modal-head h2 { margin: 0; }
+.modal-foot { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.toast-wrap { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 120; display: flex; flex-direction: column; gap: 8px; pointer-events: none; width: min(520px, calc(100% - 32px)); }
+.toast { background: var(--panel-3); border: 1px solid var(--line); border-radius: var(--r-md); padding: 10px 14px; box-shadow: var(--shadow-2); animation: slideDown .2s ease; }
+
+/* ---------- tables (cheat sheet, stats) ---------- */
+.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tbl th, .tbl td { padding: 7px 9px; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: top; }
+.tbl th { color: var(--brass); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; }
+.tbl td.num, .tbl th.num { text-align: right; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 600px) {
+  body { font-size: 14px; }
+  h1 { font-size: 25px; }
+  .modal { padding: 16px; }
+  :root { --cw: 34px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+</style>
+</head>
+<body>
+<div id="app"></div>
+<noscript><p style="padding:24px;color:#eee">Для игры нужен включённый JavaScript.</p></noscript>
+<script>
+'use strict';
+// ===== 00-util.js =====
+// ===== U: shared helpers (RNG, formatting, storage) =====
+// No module may touch DOM / window / localStorage at load time (tests load all files in Node).
+const U = (() => {
+  // Seedable RNG: U.seed(n) → deterministic mulberry32 (tests), U.seed(null) → Math.random.
+  let state = null;
+  function mulberry32() {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  const rng = () => (state === null ? Math.random() : mulberry32());
+  const seed = (n) => { state = n === null || n === undefined ? null : n >>> 0; };
+  const randInt = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
+  const chance = (p) => rng() < p;
+  const pick = (arr) => arr[Math.floor(rng() * arr.length)];
+
+  // Fisher–Yates, in place.
+  function shuffle(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+
+  const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+  const sum = (arr) => arr.reduce((s, x) => s + x, 0);
+
+  // 12500 → '12 500' (narrow no-break space).
+  const fmt = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  // fraction → '19,6%'; pctNum takes a value already in percent.
+  const pctNum = (p, digits = 0) => Number(p).toFixed(digits).replace('.', ',') + '%';
+  const pct = (x, digits = 0) => pctNum(x * 100, digits);
+  // 2.5 → '2,5'
+  const dec = (x, digits = 1) => Number(x).toFixed(digits).replace('.', ',').replace(/,0+$/, '');
+
+  // Russian plural: plural(5, 'аут', 'аута', 'аутов') → 'аутов'
+  function plural(n, one, few, many) {
+    const a = Math.abs(n) % 100, b = a % 10;
+    if (a > 10 && a < 20) return many;
+    if (b === 1) return one;
+    if (b >= 2 && b <= 4) return few;
+    return many;
+  }
+  const nplural = (n, one, few, many) => n + ' ' + plural(n, one, few, many);
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
+  const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+  // localStorage wrapper: every access in try/catch; game works without storage.
+  const PREFIX = 'pokerTrainer.';
+  const storage = {
+    get(key, fallback) {
+      try {
+        const v = localStorage.getItem(PREFIX + key);
+        return v === null ? fallback : JSON.parse(v);
+      } catch (e) { return fallback; }
+    },
+    set(key, value) {
+      try { localStorage.setItem(PREFIX + key, JSON.stringify(value)); return true; } catch (e) { return false; }
+    },
+    remove(key) {
+      try { localStorage.removeItem(PREFIX + key); } catch (e) { /* storage unavailable */ }
+    },
+  };
+
+  const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
+
+  let uidN = 0;
+  const uid = (p = 'id') => p + (++uidN) + '_' + Math.floor(Math.random() * 1e6).toString(36);
+
+  return { rng, seed, randInt, chance, pick, shuffle, clamp, sum, fmt, pct, pctNum, dec, plural, nplural, sleep, now, storage, esc, uid };
+})();
+
+// ===== 10-cards.js =====
+// ===== Cards: card ints, parsing/formatting, 169 hand codes, range notation =====
+// card = (rank - 2) * 4 + suit; rank 2..14 (14 = A); suit 0..3 = s h d c (♠ ♥ ♦ ♣)
+const Cards = (() => {
+  const RANKS = '23456789TJQKA';
+  const SUITS = 'shdc';
+  const SUIT_SYMBOLS = ['♠', '♥', '♦', '♣'];
+  const RED = [false, true, true, false];
+
+  const rank = (c) => (c >> 2) + 2;
+  const suit = (c) => c & 3;
+  const make = (r, s) => ((r - 2) << 2) | s;
+  const rankChar = (r) => RANKS[r - 2];
+  const rankLabel = (r) => (r === 10 ? '10' : RANKS[r - 2]); // for card faces / text
+  const rankOf = (ch) => (ch === '10' ? 10 : RANKS.indexOf(String(ch).toUpperCase()) + 2);
+  const isRed = (c) => RED[suit(c)];
+
+  const TOKEN = /(10|[2-9TJQKA])([shdc♠♥♦♣])/gi;
+  function parse(str) {
+    const m = /^\s*(10|[2-9TJQKA])([shdc♠♥♦♣])\s*$/i.exec(str);
+    if (!m) throw new Error('Bad card: ' + str);
+    let s = SUITS.indexOf(m[2].toLowerCase());
+    if (s < 0) s = SUIT_SYMBOLS.indexOf(m[2]);
+    return make(rankOf(m[1]), s);
+  }
+  // 'As Kd 7h' or 'AsKd7h' → [c, c, c]
+  const parseList = (str) => (String(str).match(TOKEN) || []).map(parse);
+
+  const str = (c) => rankLabel(rank(c)) + SUIT_SYMBOLS[suit(c)];
+  const strList = (cards) => cards.map(str).join(' ');
+  const deck = () => Array.from({ length: 52 }, (_, i) => i);
+
+  // [c1, c2] → 'AKs' | 'AKo' | '77' (higher rank first)
+  function handCode(c1, c2) {
+    let r1 = rank(c1), r2 = rank(c2);
+    if (r1 < r2) { const t = r1; r1 = r2; r2 = t; }
+    if (r1 === r2) return rankChar(r1) + rankChar(r2);
+    return rankChar(r1) + rankChar(r2) + (suit(c1) === suit(c2) ? 's' : 'o');
+  }
+
+  // 13×13 grid, index 0 = A … 12 = 2. Diagonal: pairs; above diagonal (i<j): suited; below: offsuit.
+  function gridCode(i, j) {
+    const ri = 14 - i, rj = 14 - j;
+    if (i === j) return rankChar(ri) + rankChar(rj);
+    if (i < j) return rankChar(ri) + rankChar(rj) + 's';
+    return rankChar(rj) + rankChar(ri) + 'o';
+  }
+  const HAND_CODES = [];
+  for (let i = 0; i < 13; i++) for (let j = 0; j < 13; j++) HAND_CODES.push(gridCode(i, j));
+
+  const codeCombos = (code) => (code.length === 2 ? 6 : code[2] === 's' ? 4 : 12);
+  // 'AKs' → {hi:14, lo:13, type:'s'}; '77' → {hi:7, lo:7, type:'p'}
+  function codeInfo(code) {
+    const hi = rankOf(code[0]), lo = rankOf(code[1]);
+    return { hi, lo, type: code.length === 2 ? 'p' : code[2] };
+  }
+  // All concrete [c1, c2] combos of a code.
+  function codeToCombos(code) {
+    const { hi, lo, type } = codeInfo(code);
+    const out = [];
+    for (let s1 = 0; s1 < 4; s1++) for (let s2 = 0; s2 < 4; s2++) {
+      if (type === 'p' && s2 <= s1) continue;
+      if (type === 's' && s1 !== s2) continue;
+      if (type === 'o' && s1 === s2) continue;
+      out.push([make(hi, s1), make(lo, s2)]);
+    }
+    return out;
+  }
+
+  // Range notation: '77+', 'JJ-22', 'AJs+', 'KQs', 'A5s-A2s', 'AK' (= AKs + AKo), 'K9o+'.
+  // 'XYs+' raises the lower card up to one below the higher card (T8s+ = T8s, T9s).
+  function parseRange(text) {
+    const set = new Set();
+    const R = '([2-9TJQKA])';
+    for (const raw of String(text).split(',')) {
+      const t = raw.trim().toUpperCase().replace(/S\b/g, 's').replace(/O\b/g, 'o');
+      if (!t) continue;
+      let m;
+      if ((m = new RegExp('^' + R + '\\1(\\+)?$').exec(t))) {
+        const r = rankOf(m[1]);
+        for (let x = r; x <= (m[2] ? 14 : r); x++) set.add(rankChar(x) + rankChar(x));
+      } else if ((m = new RegExp('^' + R + '\\1-' + R + '\\2$').exec(t))) {
+        const a = rankOf(m[1]), b = rankOf(m[2]);
+        for (let x = Math.min(a, b); x <= Math.max(a, b); x++) set.add(rankChar(x) + rankChar(x));
+      } else if ((m = new RegExp('^' + R + R + '([so])?(\\+)?$').exec(t))) {
+        const hi = rankOf(m[1]), lo = rankOf(m[2]);
+        if (hi <= lo) throw new Error('Bad range token: ' + raw);
+        const types = m[3] ? [m[3]] : ['s', 'o'];
+        for (let x = lo; x <= (m[4] ? hi - 1 : lo); x++) for (const ty of types) set.add(rankChar(hi) + rankChar(x) + ty);
+      } else if ((m = new RegExp('^' + R + R + '([so])-' + R + R + '\\3$').exec(t))) {
+        const hi = rankOf(m[1]);
+        if (rankOf(m[4]) !== hi) throw new Error('Bad range token: ' + raw);
+        const a = rankOf(m[2]), b = rankOf(m[5]);
+        for (let x = Math.min(a, b); x <= Math.max(a, b); x++) set.add(rankChar(hi) + rankChar(x) + m[3]);
+      } else {
+        throw new Error('Bad range token: ' + raw);
+      }
+    }
+    return set;
+  }
+
+  // Russian rank names: [nom sg, gen sg, nom pl, gen pl] — 'туз', 'туза', 'тузы', 'тузов'
+  const RANK_RU = {
+    14: ['туз', 'туза', 'тузы', 'тузов'],
+    13: ['король', 'короля', 'короли', 'королей'],
+    12: ['дама', 'дамы', 'дамы', 'дам'],
+    11: ['валет', 'валета', 'валеты', 'валетов'],
+    10: ['десятка', 'десятки', 'десятки', 'десяток'],
+    9: ['девятка', 'девятки', 'девятки', 'девяток'],
+    8: ['восьмёрка', 'восьмёрки', 'восьмёрки', 'восьмёрок'],
+    7: ['семёрка', 'семёрки', 'семёрки', 'семёрок'],
+    6: ['шестёрка', 'шестёрки', 'шестёрки', 'шестёрок'],
+    5: ['пятёрка', 'пятёрки', 'пятёрки', 'пятёрок'],
+    4: ['четвёрка', 'четвёрки', 'четвёрки', 'четвёрок'],
+    3: ['тройка', 'тройки', 'тройки', 'троек'],
+    2: ['двойка', 'двойки', 'двойки', 'двоек'],
+  };
+  const NOM = 0, GEN = 1, NOM_PL = 2, GEN_PL = 3;
+  const rankRu = (r, form = NOM) => RANK_RU[r][form];
+  // Suit words for counting: [1 card, 2–4 cards, 5+ cards] — 'черва', 'червы', 'черв'
+  const SUIT_RU = [['пика', 'пики', 'пик'], ['черва', 'червы', 'черв'], ['бубна', 'бубны', 'бубен'], ['трефа', 'трефы', 'треф']];
+  const suitRu = (s, n) => {
+    const f = SUIT_RU[s];
+    const a = Math.abs(n) % 100, b = a % 10;
+    return a > 10 && a < 20 ? f[2] : b === 1 ? f[0] : b >= 2 && b <= 4 ? f[1] : f[2];
+  };
+
+  return {
+    RANKS, SUITS, SUIT_SYMBOLS, rank, suit, make, rankChar, rankLabel, rankOf, isRed,
+    parse, parseList, str, strList, deck, handCode, gridCode, HAND_CODES, codeCombos, codeInfo, codeToCombos,
+    parseRange, RANK_RU, rankRu, NOM, GEN, NOM_PL, GEN_PL, suitRu,
+  };
+})();
+
+// ===== 20-handeval.js =====
+// ===== HandEval: best-5 evaluator for 1..7 cards =====
+// score = cat << 20 | k1 << 16 | k2 << 12 | k3 << 8 | k4 << 4 | k5   (higher = better, k = rank 2..14)
+// Fewer than 5 cards → only pair-type categories (no straight/flush), missing kickers = 0.
+const HandEval = (() => {
+  const CAT = { HIGH: 0, PAIR: 1, TWO_PAIR: 2, TRIPS: 3, STRAIGHT: 4, FLUSH: 5, FULL_HOUSE: 6, QUADS: 7, STRAIGHT_FLUSH: 8 };
+  const CAT_RU = ['Старшая карта', 'Пара', 'Две пары', 'Тройка', 'Стрит', 'Флеш', 'Фулл-хаус', 'Каре', 'Стрит-флеш'];
+
+  // Highest straight top rank in a rank bitmask (bit r = rank r), ace also plays low. 0 if none.
+  function straightTop(mask) {
+    if (mask & (1 << 14)) mask |= 1 << 1;
+    for (let top = 14; top >= 5; top--) {
+      const need = 31 << (top - 4);
+      if ((mask & need) === need) return top;
+    }
+    return 0;
+  }
+
+  const pack = (cat, k1 = 0, k2 = 0, k3 = 0, k4 = 0, k5 = 0) => (cat << 20) | (k1 << 16) | (k2 << 12) | (k3 << 8) | (k4 << 4) | k5;
+  const cat = (score) => score >> 20;
+
+  const counts = new Int8Array(15);
+  const suitCount = new Int8Array(4);
+  const suitMask = new Int32Array(4);
+
+  function score(cards) {
+    counts.fill(0); suitCount.fill(0); suitMask.fill(0);
+    let rankMask = 0;
+    for (let i = 0; i < cards.length; i++) {
+      const c = cards[i], r = (c >> 2) + 2, s = c & 3;
+      counts[r]++; suitCount[s]++; suitMask[s] |= 1 << r; rankMask |= 1 << r;
+    }
+    let flush = -1;
+    for (let s = 0; s < 4; s++) if (suitCount[s] >= 5) flush = s;
+    if (flush >= 0) {
+      const sf = straightTop(suitMask[flush]);
+      if (sf) return pack(8, sf);
+    }
+    let quad = 0, t1 = 0, t2 = 0, p1 = 0, p2 = 0, p3 = 0;
+    for (let r = 14; r >= 2; r--) {
+      const k = counts[r];
+      if (k === 4) { if (!quad) quad = r; }
+      else if (k === 3) { if (!t1) t1 = r; else if (!t2) t2 = r; }
+      else if (k === 2) { if (!p1) p1 = r; else if (!p2) p2 = r; else if (!p3) p3 = r; }
+    }
+    // kickers: highest present ranks excluding up to two ranks
+    const kick = (n, ex1, ex2) => {
+      const out = [0, 0, 0, 0, 0];
+      let j = 0;
+      for (let r = 14; r >= 2 && j < n; r--) if (counts[r] && r !== ex1 && r !== ex2) out[j++] = r;
+      return out;
+    };
+    if (quad) return pack(7, quad, kick(1, quad)[0]);
+    if (t1 && (t2 || p1)) return pack(6, t1, Math.max(t2, p1));
+    if (flush >= 0) {
+      const k = [];
+      for (let r = 14; r >= 2 && k.length < 5; r--) if (suitMask[flush] & (1 << r)) k.push(r);
+      return pack(5, k[0], k[1], k[2], k[3], k[4]);
+    }
+    const st = straightTop(rankMask);
+    if (st) return pack(4, st);
+    if (t1) { const k = kick(2, t1); return pack(3, t1, k[0], k[1]); }
+    if (p1 && p2) return pack(2, p1, p2, kick(1, p1, p2)[0]);
+    if (p1) { const k = kick(3, p1); return pack(1, p1, k[0], k[1], k[2]); }
+    const k = kick(5);
+    return pack(0, k[0], k[1], k[2], k[3], k[4]);
+  }
+
+  const kickers = (s) => [(s >> 16) & 15, (s >> 12) & 15, (s >> 8) & 15, (s >> 4) & 15, s & 15];
+
+  // Russian name from a score: 'Две пары: тузы и семёрки', 'Стрит до пятёрки', 'Роял-флеш'
+  function describe(s) {
+    const c = cat(s), k = kickers(s), R = Cards.rankRu;
+    switch (c) {
+      case 8: return k[0] === 14 ? 'Роял-флеш' : 'Стрит-флеш до ' + R(k[0], 1);
+      case 7: return 'Каре ' + R(k[0], 3);
+      case 6: return 'Фулл-хаус: тройка ' + R(k[0], 3) + ' и пара ' + R(k[1], 3);
+      case 5: return 'Флеш до ' + R(k[0], 1);
+      case 4: return 'Стрит до ' + R(k[0], 1);
+      case 3: return 'Тройка ' + R(k[0], 3);
+      case 2: return 'Две пары: ' + R(k[0], 2) + ' и ' + R(k[1], 2);
+      case 1: return 'Пара ' + R(k[0], 3);
+      default: return 'Старшая карта: ' + R(k[0], 0);
+    }
+  }
+
+  // Full info incl. the best five cards (for highlighting). Brute force over 5-card subsets.
+  function evaluate(cards) {
+    const s = score(cards);
+    let best = cards.slice(0, 5);
+    if (cards.length > 5) {
+      const n = cards.length;
+      outer:
+      for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) for (let c = b + 1; c < n; c++)
+        for (let d = c + 1; d < n; d++) for (let e = d + 1; e < n; e++) {
+          const five = [cards[a], cards[b], cards[c], cards[d], cards[e]];
+          if (score(five) === s) { best = five; break outer; }
+        }
+    }
+    return { score: s, cat: cat(s), best, name: describe(s), catName: CAT_RU[cat(s)] };
+  }
+
+  const compare = (a, b) => Math.sign(score(a) - score(b));
+
+  return { CAT, CAT_RU, score, cat, kickers, describe, evaluate, compare, straightTop };
+})();
+
+// ===== 30-equity.js =====
+// ===== Equity: exact enumeration / Monte Carlo, preflop hand order =====
+const Equity = (() => {
+  const choose = (n, k) => {
+    if (k < 0 || k > n) return 0;
+    let r = 1;
+    for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i;
+    return Math.round(r);
+  };
+
+  // Equity of known hands. hands: [[c1,c2], ...]; board: 0..5 cards.
+  // opts.toCome: board cards still to deal (default 5 - board.length; e.g. 1 = "only the next card")
+  // opts.dead: extra removed cards; opts.exactLimit (default 30000 runouts); opts.iters (MC, default 10000)
+  // → { eq: [share 0..1], win: [], tie: [], samples, exact }
+  function calc(hands, board, opts = {}) {
+    const toCome = opts.toCome ?? 5 - board.length;
+    const used = new Set([...hands.flat(), ...board, ...(opts.dead || [])]);
+    const deck = Cards.deck().filter((c) => !used.has(c));
+    const n = hands.length;
+    const eq = new Array(n).fill(0), win = new Array(n).fill(0), tie = new Array(n).fill(0);
+    const sc = new Array(n);
+    const cardsBuf = hands.map((h) => h.concat(board, new Array(toCome).fill(0)));
+    const base = 2 + board.length;
+    let samples = 0;
+
+    const run = (extra) => {
+      let best = -1, nb = 0;
+      for (let i = 0; i < n; i++) {
+        const buf = cardsBuf[i];
+        for (let j = 0; j < toCome; j++) buf[base + j] = extra[j];
+        const s = (sc[i] = HandEval.score(buf));
+        if (s > best) { best = s; nb = 1; } else if (s === best) nb++;
+      }
+      for (let i = 0; i < n; i++) if (sc[i] === best) {
+        eq[i] += 1 / nb;
+        if (nb === 1) win[i]++; else tie[i]++;
+      }
+      samples++;
+    };
+
+    const total = choose(deck.length, toCome);
+    const exact = total <= (opts.exactLimit ?? 30000);
+    const extra = new Array(toCome);
+    if (exact) {
+      const rec = (start, depth) => {
+        if (depth === toCome) { run(extra); return; }
+        for (let i = start; i <= deck.length - (toCome - depth); i++) { extra[depth] = deck[i]; rec(i + 1, depth + 1); }
+      };
+      rec(0, 0);
+    } else {
+      const iters = opts.iters ?? 10000;
+      const w = deck.slice();
+      for (let it = 0; it < iters; it++) {
+        for (let j = 0; j < toCome; j++) {
+          const k = j + Math.floor(U.rng() * (w.length - j));
+          const t = w[j]; w[j] = w[k]; w[k] = t;
+          extra[j] = w[j];
+        }
+        run(extra);
+      }
+    }
+    const d = samples || 1;
+    return { eq: eq.map((x) => x / d), win: win.map((x) => x / d), tie: tie.map((x) => x / d), samples, exact };
+  }
+
+  // Hero equity vs nOpp unknown hands (Monte Carlo to the river).
+  // opts.iters (default 1000), opts.dead, opts.oppFilter(hole, board) → boolean | weight 0..1
+  // (rejection sampling, up to 40 tries per opponent; models "hands this opponent would play this way").
+  function vsRandom(hole, board, nOpp, opts = {}) {
+    if (nOpp <= 0) return 1;
+    const iters = opts.iters ?? 1000;
+    const filter = opts.oppFilter || null;
+    const used = new Set([...hole, ...board, ...(opts.dead || [])]);
+    const w = Cards.deck().filter((c) => !used.has(c));
+    const toCome = 5 - board.length;
+    const heroBuf = hole.concat(board, new Array(toCome).fill(0));
+    const oppBuf = new Array(nOpp).fill(0).map(() => [0, 0].concat(board, new Array(toCome).fill(0)));
+    const base = 2 + board.length;
+    let total = 0;
+    const draw = (pos) => {
+      const k = pos + Math.floor(U.rng() * (w.length - pos));
+      const t = w[pos]; w[pos] = w[k]; w[k] = t;
+      return w[pos];
+    };
+    for (let it = 0; it < iters; it++) {
+      let pos = 0;
+      for (let o = 0; o < nOpp; o++) {
+        let a, b;
+        for (let tries = 0; ; tries++) {
+          a = draw(pos); b = draw(pos + 1);
+          if (!filter || tries >= 40) break;
+          const v = filter([a, b], board);
+          const wgt = v === true ? 1 : v === false ? 0 : +v || 0;
+          if (wgt >= 1 || (wgt > 0 && U.rng() < wgt)) break;
+        }
+        oppBuf[o][0] = a; oppBuf[o][1] = b;
+        pos += 2;
+      }
+      for (let j = 0; j < toCome; j++) {
+        const c = draw(pos++);
+        heroBuf[base + j] = c;
+        for (let o = 0; o < nOpp; o++) oppBuf[o][base + j] = c;
+      }
+      const hs = HandEval.score(heroBuf);
+      let best = 0, ties = 0;
+      for (let o = 0; o < nOpp; o++) {
+        const s = HandEval.score(oppBuf[o]);
+        if (s > best) { best = s; ties = s === hs ? 1 : 0; } else if (s === best && s === hs) ties++;
+      }
+      if (hs > best) total += 1;
+      else if (hs === best) total += 1 / (ties + 1);
+    }
+    return total / iters;
+  }
+
+  // 169 starting hands, strongest → weakest. Generated by tools/gen-preflop-order.js
+  // (average of rank by equity vs 1 and vs 2 random hands).
+  const PREFLOP_ORDER = 'AA KK QQ JJ TT 99 88 AKs AQs AJs AKo 77 AQo ATs KQs AJo KJs A9s 66 KQo KTs ATo A8s QJs A7s KJo K9s A9o QTs A6s A5s KTo 55 A8o A4s JTs Q9s QJo A7o K8s A3s QTo K9o A2s K7s A5o A6o J9s Q8s JTo A4o K6s 44 K8o T9s K5s Q9o A3o J8s K4s A2o Q7s K7o J9o Q8o K6o T8s K3s Q6s J7s K5o T9o 33 K2s Q5s Q4s 98s K4o J8o T7s Q7o Q3s J6s T8o K3o 97s J5s Q2s 87s Q6o K2o T6s Q5o 98o J7o J4s J3s 96s 22 Q4o 76s T7o T4s T5s 86s 97o J2s Q3o J6o 95s 85s Q2o J5o T6o 87o T3s 75s J4o T2s 65s 96o J3o 93s 86o 54s 94s J2o T5o 76o 74s 64s 84s T4o 92s 95o T3o 85o 65o 63s 53s 73s T2o 83s 82s 75o 43s 94o 93o 54o 74o 52s 62s 84o 64o 72s 92o 42s 53o 83o 32s 73o 82o 63o 43o 52o 62o 72o 42o 32o'.split(' ');
+  const idx = new Map(PREFLOP_ORDER.map((c, i) => [c, i]));
+  const cum = [];
+  { let acc = 0; for (const c of PREFLOP_ORDER) { acc += Cards.codeCombos(c); cum.push(acc / 1326); } }
+  const preflopRank = (code) => idx.get(code);                 // 0 = AA … 168 = worst
+  const preflopTopPct = (code) => cum[idx.get(code)];          // share of all 1326 combos at least this strong
+  const holeTopPct = (hole) => preflopTopPct(Cards.handCode(hole[0], hole[1]));
+
+  return { choose, calc, vsRandom, PREFLOP_ORDER, preflopRank, preflopTopPct, holeTopPct };
+})();
+
+// ===== 70-view.js =====
+// ===== View: tiny shared DOM helpers (cards, suit-coloured text, modal, toast) =====
+// Used by UI (table) and Screens. Pure string builders are DOM-free; DOM functions touch
+// `document` only when called.
+const View = (() => {
+  // '<div class="pcard red"><span class="pc-r">A</span><span class="pc-s">♥</span></div>'
+  // opts: {size:'sm'|'xs', hl:bool, dim:bool, corner:bool (adds corner index)}
+  function cardHTML(c, opts = {}) {
+    const cls = ['pcard'];
+    if (opts.size) cls.push(opts.size);
+    if (opts.hl) cls.push('hl');
+    if (opts.dim) cls.push('dim');
+    if (c === null || c === undefined) return `<div class="${cls.join(' ')} back" aria-label="карта рубашкой"></div>`;
+    if (c === -1) return `<div class="${cls.join(' ')} empty"></div>`;
+    if (Cards.isRed(c)) cls.push('red');
+    const r = Cards.rankLabel(Cards.rank(c)), s = Cards.SUIT_SYMBOLS[Cards.suit(c)];
+    return `<div class="${cls.join(' ')}" data-c="${c}" aria-label="${r}${s}"><span class="pc-r">${r}</span><span class="pc-s">${s}</span></div>`;
+  }
+  const cardsHTML = (cards, opts = {}) => `<span class="cards-row">${cards.map((c) => cardHTML(c, opts)).join('')}</span>`;
+
+  // Escape plain text and colour suit symbols: 'A♥ K♥' → 'A<span class="s-red">♥</span> …'
+  const suitText = (text) => U.esc(text).replace(/[♥♦]/g, '<span class="s-red">$&</span>');
+
+  // Feedback block: fb = {verdict:'correct'|'acceptable'|'mistake'|'info', title, lines:[...]}
+  function feedbackHTML(fb) {
+    const lines = (fb.lines || []).map((l) => `<div class="fb-line">${suitText(l)}</div>`).join('');
+    return `<div class="fb ${fb.verdict || 'info'}"><div class="fb-title v-${fb.verdict || 'info'}">${suitText(fb.title || '')}</div>${lines}</div>`;
+  }
+
+  function el(html) {
+    const t = document.createElement('template');
+    t.innerHTML = html.trim();
+    return t.content.firstElementChild;
+  }
+
+  // modal(title, bodyHTML, {buttons:[{label, value, cls}], wide:bool, onOpen(root)}) → Promise<value|null>
+  function modal(title, bodyHTML, opts = {}) {
+    return new Promise((resolve) => {
+      const buttons = opts.buttons || [{ label: 'Закрыть', value: null, cls: 'btn-primary' }];
+      const back = el(`<div class="modal-back" role="dialog" aria-modal="true" aria-label="${U.esc(title)}">
+        <div class="modal"${opts.wide ? ' style="width:min(980px,100%)"' : ''}>
+          <div class="modal-head"><h2>${U.esc(title)}</h2><button class="btn btn-ghost btn-sm" data-x aria-label="Закрыть">✕</button></div>
+          <div class="modal-body">${bodyHTML}</div>
+          <div class="modal-foot">${buttons.map((b, i) => `<button class="btn ${b.cls || ''}" data-i="${i}">${U.esc(b.label)}</button>`).join('')}</div>
+        </div></div>`);
+      const close = (v) => { document.removeEventListener('keydown', onKey); back.remove(); resolve(v); };
+      const onKey = (e) => { if (e.key === 'Escape') close(null); };
+      back.addEventListener('click', (e) => {
+        if (e.target === back || e.target.closest('[data-x]')) return close(null);
+        const b = e.target.closest('[data-i]');
+        if (b && b.parentElement.classList.contains('modal-foot')) close(buttons[+b.dataset.i].value);
+      });
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(back);
+      if (opts.onOpen) opts.onOpen(back.querySelector('.modal-body'));
+      const first = back.querySelector('.modal-foot .btn');
+      if (first) first.focus({ preventScroll: true });
+    });
+  }
+
+  function toast(text, ms = 3000) {
+    let wrap = document.querySelector('.toast-wrap');
+    if (!wrap) { wrap = el('<div class="toast-wrap" aria-live="polite"></div>'); document.body.appendChild(wrap); }
+    const t = el(`<div class="toast">${suitText(text)}</div>`);
+    wrap.appendChild(t);
+    setTimeout(() => t.remove(), ms);
+  }
+
+  return { cardHTML, cardsHTML, suitText, feedbackHTML, el, modal, toast };
+})();
+
+</script>
+</body>
+</html>

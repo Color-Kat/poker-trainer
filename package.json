@@ -1,0 +1,12 @@
+{
+  "name": "poker-trainer",
+  "private": true,
+  "description": "Тренажёр покера (NLHE) — один самодостаточный HTML-файл",
+  "scripts": {
+    "build": "node build.js",
+    "test": "node tests/run.js"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.65.0"
+  }
+}
