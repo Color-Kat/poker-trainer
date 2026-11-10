@@ -207,7 +207,9 @@ Coach.heroStrong(hole, board) → bool
 ```
 Teaching rules (ТЗ §6–7): outs ±1, rule-of-2/4 equity ±3 pp (×4 − (outs − 8) above 8 outs), pot odds ±2 pp
 (`call ÷ (pot incl. bet + call)`), cards-to-see = 2 only for a flop all-in. Multiway (3+ players) → only clean outs.
-Overcards (no pair, hole card above the board) may be counted as 3 outs each (accepted alternative).
+Overcards (no pair, hole card above the board) = 3 outs each: counted in full heads-up vs a bet < ⅔ pot, by half
+(`overHalf`) vs a bet ≥ ⅔ pot or multiway. `correctOuts` = `outsBase` (clean outs if multiway) + overcard outs;
+answers without / half / full overcards are accepted. Quiz, rule equity, implied odds and verdicts all use `correctOuts`.
 
 ## Settings / Stats / Screens (`72-settings.js`, `75-stats.js`, `85-screens.js`)
 

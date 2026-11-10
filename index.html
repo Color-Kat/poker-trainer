@@ -3148,8 +3148,10 @@ const Coach = (() => {
     if (short) { const lim = paidOf(hand, seat) + toCall; pot = hand.seats.reduce((a, s) => a + Math.min(paidOf(hand, s), lim), 0); }
     const allInSpot = facing && (toCall >= lg.stack || oppSeats.every((s) => hand.allIn[s]));
     const cardsToSee = street === 'flop' && allInSpot ? 2 : 1;
-    const correctOuts = multiway ? outs.clean : outs.total;
-    const overOk = !multiway && outs.over > 0 && (!facing || sizeFrac < 0.5);
+    // Overcards (no pair, hole card above the board): 3 outs each heads-up vs no bet / a bet < 2/3 pot;
+    // vs a big bet or 3+ players a pair of them may not be enough — half (rounded). Accepted: without, half, full.
+    const outsBase = multiway ? outs.clean : outs.total, overHalf = multiway || (facing && sizeFrac >= 0.66);
+    const half = Math.round(outs.over / 2), correctOuts = outsBase + (overHalf ? half : outs.over);
     const rule = (o) => (cardsToSee === 1 ? o * 2 : o * 4 - Math.max(0, o - 8));
     const needed = facing ? (toCall / (pot + toCall)) * 100 : 0;
 
@@ -3159,9 +3161,9 @@ const Coach = (() => {
     const vp = P(vSeat), villainFE = foldEqOf(vp), base = baseOf(vp);
     const sp = {
       street, kind, facing, hole: hole.slice(), board, pot, toCall, betTo: hand.currentBet, bettor: facing ? bettor : null, sizeFrac, allInSpot, callers,
-      nOpp, multiway, outs, correctOuts, acceptedOuts: overOk ? [correctOuts, correctOuts + outs.over] : [correctOuts],
+      nOpp, multiway, outs, correctOuts, acceptedOuts: [...new Set([correctOuts, outsBase + half, outsBase, outsBase + outs.over])],
       cardsToSee, ruleEq: rule(correctOuts), needed, estEq: null, made, foldEq: multiway ? lower(villainFE) : villainFE,
-      seat, myBet, short, canRaise: !!lg.canRaise, overOk, villainFE, stack: lg.stack, bb: hand.bb || 20,
+      seat, myBet, short, canRaise: !!lg.canRaise, outsBase, overHalf, villainFE, stack: lg.stack, bb: hand.bb || 20,
       minTo: lg.minTo || hand.currentBet * 2 || hand.bb || 20,
       potStart: hand.potAtStreetStart != null ? hand.potAtStreetStart : pot - U.sum(hand.bets),
       opps: oppSeats.map((s) => ({ seat: s, name: P(s).name })),
@@ -3188,8 +3190,9 @@ const Coach = (() => {
 
   const B = 'best', OK = 'ok', M = 'mistake';
   const REAL_DRAWS = ['flush', 'oesd', 'double', 'straight'];
-  // Overcards were accepted as outs (small bet, heads-up) and with them the rule pays for the call.
-  const overCall = (sp) => sp.facing && sp.overOk && ruleOf(sp)(sp.correctOuts + sp.outs.over) >= sp.needed && sp.ruleEq < sp.needed && !implOk(sp);
+  // Overcards counted by half, but the accepted full count (3 each) pays for the call.
+  const overAll = (sp) => sp.outsBase + sp.outs.over;
+  const overCall = (sp) => sp.facing && sp.overHalf && sp.outs.over > 0 && ruleOf(sp)(overAll(sp)) >= sp.needed && sp.ruleEq < sp.needed && !implOk(sp);
   // Implied odds: what a made draw wins later. future = min(chips behind, pot after the call × payoff); the payoff
   // depends on how the opponents pay off and shrinks for obvious/dirty draws and with one street left.
   const PAYOFF = { station: 1, maniac: 0.8, reg: 0.5, rock: 0.3 };
@@ -3218,8 +3221,9 @@ const Coach = (() => {
     const eq = (sp.street === 'flop' ? o * 4 - Math.max(0, o - 8) : o * 2) / 100;
     const ev = fp * sp.pot + (1 - fp) * (eq * (sp.pot + add + (to - sp.betTo)) - add);
     sp.semi = { to, fp, eq, ev };
-    // ponytail: fp is a 48-combo Monte Carlo — a weak draw (< 8 outs) needs a clear margin, or the verdict flips between runs
-    return o < 8 ? (ev >= 0.1 * sp.pot ? OK : M) : ev >= 0.1 * sp.pot ? B : ev >= 0 ? OK : M;
+    // ponytail: fp is a 48-combo Monte Carlo (±~7% vs a tight bettor) — 'best' and a weak draw's 'ok' need a clear
+    // margin, or the verdict flips between runs (A♥K♥ = 12 outs vs a rock's pot bet sits at ~0.05–0.1 pot)
+    return o < 8 ? (ev >= 0.1 * sp.pot ? OK : M) : ev >= 0.15 * sp.pot ? B : ev >= 0 ? OK : M;
   }
   function drawVerdicts(sp) {
     const o = sp.correctOuts, fe = sp.foldEq, folds = fe === 'high' || fe === 'medium';
@@ -3227,8 +3231,9 @@ const Coach = (() => {
     let best, v;
     // no bet: a semi-bluff needs fold equity — against a calling station only a huge draw may bet
     if (!sp.facing) { best = 'check'; v = { check: B, raise: o >= 8 && folds ? B : fe === 'none' && o < 12 ? M : OK, fold: M }; }
-    // 12+ outs: the raise is preferred; when the call loses even with implied odds, folding is the fallback
-    else if (o >= 12 && fe !== 'none' && sp.canRaise) { best = 'raise'; v = callOk || impl ? { raise: B, call: OK, fold: M } : { raise: B, fold: OK, call: M }; }
+    // 12+ outs: the raise is preferred (unless the real bot logic says the bettor won't fold); when the call loses
+    // even with implied odds, folding is the fallback
+    else if (o >= 12 && fe !== 'none' && sp.canRaise && semiVd(sp) === B) { best = 'raise'; v = callOk || impl ? { raise: B, call: OK, fold: M } : { raise: B, fold: OK, call: M }; }
     else if (callOk) { best = 'call'; v = { call: B, raise: o >= 8 && folds ? OK : M, fold: M }; }
     else if (impl) { best = 'call'; v = { call: B, fold: OK, raise: semiVd(sp) === M ? M : OK }; } // implied odds pay for the call
     else { // a draw just short of the implied price (within the same 5 pp as isClose): the call is no blunder
@@ -3301,7 +3306,8 @@ const Coach = (() => {
 
   // ---------- questions ----------
   const OUTS_HINT = 'Посчитай карты, которые сделают руку сильной: флеш-дро — 9 аутов, открытое стрит-дро — 8, гатшот — 4, ' +
-    'карманная пара до сета — 2, пара до трипса — 2, вторая пара к своей карте — 3. Каждую карту считай один раз.';
+    'карманная пара до сета — 2, пара до трипса — 2, вторая пара к своей карте — 3. Каждую карту считай один раз. ' +
+    'Без пары: карта старше борда (оверкарта) — 3 аута, против крупной ставки (2/3 банка+) или 3+ игроков — по половине.';
   function questions(spot, settings) {
     if (!spot) return [];
     const on = (settings && settings.questions) || {};
@@ -3375,38 +3381,55 @@ const Coach = (() => {
   const formula = (sp, o) => (sp.cardsToSee === 1 ? `${o} × 2 = ${o * 2}%` : o > 8 ? `${o} × 4 − (${o} − 8) = ${ruleOf(sp)(o)}%` : `${o} × 4 = ${o * 4}%`);
   const cardsNote = (sp) => (sp.cardsToSee === 2 ? '(две карты: олл-ин на флопе)' : sp.street === 'turn' ? '(одна карта: впереди только ривер)' : '(одна карта, ставка не олл-ин)');
 
-  // accusative singular: туза, короля, валета, but даму, десятку …
-  const accOf = (r) => { const n = Cards.rankRu(r); return n.endsWith('а') ? n.slice(0, -1) + 'у' : Cards.rankRu(r, Cards.GEN); };
-  function overNote(sp) {
-    const ranks = [...new Set(sp.outs.overList.map(R))].sort((a, b) => b - a);
-    const names = cap(joinRu(ranks.map(NP)));
+  // Accepted outs other than the main answer: without overcards, overcards by half, overcards in full.
+  const altRu = (sp, a) => (a === sp.outsBase ? 'без оверкарт' : a === sp.outsBase + sp.outs.over ? 'оверкарты полностью' : 'оверкарты по половине');
+  // heads-up vs a small bet the overcards count in full: leaving them out is only acceptable
+  const baseOnly = (sp, a) => !sp.overHalf && a === sp.outsBase && a !== sp.correctOuts;
+  // «9 на флеш + 6 на пару (тузы, короли) = 15 аутов.» + why the overcards count fully or by half; details for `more`.
+  function overLines(sp) {
+    const o = sp.outs, ranks = [...new Set(o.overList.map(R))].sort((a, b) => b - a), names = ranks.map(NP).join(', ');
     // on a board with trips the "pair" is a full house
-    const boat = HandEval.cat(HandEval.score([...sp.hole, ...sp.board, sp.outs.overList[0]])) >= CAT.FULL_HOUSE;
-    const what = boat ? 'фулл-хауса' : `пары ${Cards.rankRu(ranks[0], Cards.GEN)}`;
-    if (!sp.overOk) {
-      const why = sp.multiway ? 'соперников несколько' : sp.sizeFrac >= 0.66 ? 'соперник ставил крупно' : `ставка соперника немаленькая (${pctR(sp.sizeFrac * 100)} банка)`;
-      return `${names} не считаем: ${why}, и ${what} может не хватить.`;
-    }
-    const how = ranks.length > 1 ? `${names} можно посчитать как оверкарты, по 3 аута на каждую` : `${cap(accOf(ranks[0]))} можно посчитать как оверкарту — ещё 3 аута`;
-    return `${how}: ${sp.facing ? 'ставка небольшая' : 'соперник не ставил'}, и ${what} может хватить. Тогда ${sp.correctOuts + sp.outs.over} — тоже верно.`;
+    const boat = HandEval.cat(HandEval.score([...sp.hole, ...sp.board, o.overList[0]])) >= CAT.FULL_HOUSE;
+    const what = boat ? 'фулл-хауса' : `пары ${Cards.rankRu(ranks[0], Cards.GEN)}`, n = sp.correctOuts - sp.outsBase;
+    const kinds = [...new Set(o.draws.map((d) => DRAW_NA[d.type]))];
+    const base = o.total ? `${sp.outsBase}${sp.multiway && o.dirty ? ' чистых' : ''} на ${joinRu(kinds)}` : null;
+    const sum = cap(`${[base, `${n} на ${boat ? 'фулл-хаус' : 'пару'} (${names}${sp.overHalf ? ', по половине' : ''})`].filter(Boolean).join(' + ')} = ${outsW(sp.correctOuts)}.`);
+    const why = !sp.overHalf ? `${sp.facing ? 'Ставка небольшая' : 'Соперник не ставил'} — ${what} часто хватает: оверкарты считаем полностью.`
+      : sp.multiway ? `Соперников несколько — ${what} может не хватить: оверкарты считаем по половине.`
+      : `Против крупной ставки ${what} может не хватить — считаем по половине.`;
+    const detail = `Оверкарты (старше всех карт борда): ${names} — по 3 аута на каждую${o.over % 3 ? ' (часть уже в дро)' : ''}, всего ${o.over}` +
+      `${sp.overHalf ? `, по половине ${n}` : ''}. Ответы ${sp.acceptedOuts.filter((a) => a !== sp.correctOuts).sort((a, b) => a - b).join(' и ')} тоже засчитываются.`;
+    return [sum, why, detail];
   }
   const DRAW_SHORT = { flush: 'флеш-дро', oesd: 'стрит-дро', double: 'двойной гатшот', gutshot: 'гатшот', straight: 'стрит-дро',
     set: 'до сета', boat: 'до фулл-хауса', trips: 'до тройки', twopair: 'до двух пар' };
-  // Short summary lines first (they become `lines`), the full explanation after them (`more`).
+  const DRAW_NA = { flush: 'флеш', oesd: 'стрит', double: 'стрит', gutshot: 'стрит', straight: 'стрит', set: 'сет', boat: 'фулл-хаус', trips: 'тройку', twopair: 'две пары' };
+  // Short summary lines (`first` → lines) and the full explanation (`rest` → always under «Подробнее»).
   function outsLines(sp) {
     const o = sp.outs, first = [], rest = [];
-    if (!o.draws.length) first.push('Ни одна карта не сделает твою руку сильной: дро нет — 0 аутов.');
-    else if (o.draws.length === 1) first.push(o.draws[0].text);
-    else {
-      const sum = U.sum(o.draws.map((d) => d.n)), dup = sum - o.total;
-      first.push(cap(`${o.draws.map((d) => `${DRAW_SHORT[d.type]} ${d.n}`).join(' + ')}${dup ? ` − ${dup} повтор` : ''} = ${outsW(o.total)}.`));
+    if (o.over) {
+      const [sum, why] = overLines(sp);
+      first.push(sum, why);
       rest.push(...o.draws.map((d) => d.text));
+    } else if (!o.draws.length) first.push('Ни одна карта не сделает твою руку сильной: дро нет — 0 аутов.');
+    else if (o.draws.length === 1) first.push(o.draws[0].text);
+    if (o.draws.length > 1) {
+      const sum = U.sum(o.draws.map((d) => d.n)), dup = sum - o.total;
+      if (!o.over) {
+        first.push(cap(`${o.draws.map((d) => `${DRAW_SHORT[d.type]} ${d.n}`).join(' + ')}${dup ? ` − ${dup} повтор` : ''} = ${outsW(o.total)}.`));
+        rest.push(...o.draws.map((d) => d.text));
+      }
       const twice = o.list.filter((c) => o.draws.filter((d) => d.cards.includes(c)).length > 1).map(Cards.str);
       const dupTxt = dup ? ` − ${dup} (${twice.join(', ')}: ${dup > 1 ? 'эти карты посчитаны' : 'эта карта посчитана'} дважды)` : '';
       rest.push(`Всего: ${o.draws.map((d) => d.n).join(' + ')}${dupTxt} = ${outsW(o.total)}.`);
     }
-    if (sp.multiway && o.dirty) first.push(`3+ игроков — только чистые ауты: ${o.total} − ${o.dirty} = ${o.clean}.`);
-    if (o.over) first.push(overNote(sp));
+    if (o.over) rest.push(overLines(sp)[2]);
+    if (sp.multiway && o.dirty && !o.over) first.push(`3+ игроков — только чистые ауты: ${o.total} − ${o.dirty} = ${o.clean}.`);
+    // pairing a hole card below the board's top card is never an out
+    const hr = sp.hole.map(R), br = sp.board.map(R), top = Math.max(...br);
+    const under = hr[0] === hr[1] || hr.some((r) => br.includes(r)) || HandEval.cat(HandEval.score([...sp.hole, ...sp.board])) >= CAT.STRAIGHT ? []
+      : [...new Set(hr.filter((r) => r < top))].sort((a, b) => b - a);
+    if (under.length) rest.push(`${cap(joinRu(under.map(NP)))} не считаем: пара младше ${Cards.rankRu(top, Cards.GEN)} на борде почти никогда не выигрывает.`);
     if (o.dirty) {
       rest.push('Грязные ауты: ' + Object.keys(DIRTY_RU).map((k) => {
         const cs = o.dirtyList.filter((d) => d.code === k).map((d) => Cards.str(d.c));
@@ -3417,7 +3440,7 @@ const Coach = (() => {
       rest.push(o.dirty ? `В банке 3+ игроков — считаем только чистые ауты: против нескольких соперников грязные слишком часто проигрывают. ${o.total} − ${o.dirty} = ${o.clean}.`
         : 'В банке 3+ игроков — считаем только чистые ауты; здесь все ауты чистые.');
     }
-    return [...first, ...rest];
+    return { first, rest };
   }
   function potLines(sp) {
     const { pot, toCall, potStart, myBet } = sp, f = U.fmt;
@@ -3443,10 +3466,13 @@ const Coach = (() => {
     const xs = Number.isFinite(x) ? numRu(x) : '';
     if (qid === 'outs') {
       const hit = sp.acceptedOuts.find((a) => Math.abs(x - a) <= 1);
-      const lines = outsLines(sp);
-      if (hit === undefined) return fb('outs', M, `❌ Ауты: ${said(xs)}, правильно ${sp.correctOuts}.`, lines);
+      const { first, rest } = outsLines(sp);
+      const out = (v, t) => { const f = fb('outs', v, t, first), more = [...(f.more || []), ...rest]; return more.length ? { ...f, more } : f; };
+      if (hit === undefined) return out(M, `❌ Ауты: ${said(xs)}, правильно ${sp.correctOuts}.`);
       const near = x !== hit ? ` (ты указал ${xs}, допуск ±1)` : '';
-      return fb('outs', 'correct', hit === sp.correctOuts ? `✅ Ауты: ${sp.correctOuts} — верно${near}.` : `✅ Ауты: ${hit} — засчитано (с оверкартами; без них ${sp.correctOuts})${near}.`, lines);
+      if (hit === sp.correctOuts) return out('correct', `✅ Ауты: ${sp.correctOuts} — верно${near}.`);
+      return baseOnly(sp, hit) ? out('acceptable', `⚠️ Ауты: ${hit} — засчитано без оверкарт, но правильно ${sp.correctOuts}${near}.`)
+        : out('correct', `✅ Ауты: ${hit} — засчитано (${altRu(sp, hit)}; основной ответ ${sp.correctOuts})${near}.`);
     }
     if (qid === 'cards') {
       const w = (k) => (k === 2 ? 'две' : 'одна');
@@ -3458,9 +3484,11 @@ const Coach = (() => {
     }
     if (qid === 'equity') {
       const note = cardsNote(sp), hit = sp.acceptedOuts.find((a) => Math.abs(x - rule(a)) <= 3);
+      if (hit === sp.correctOuts) return fb('equity', 'correct', `✅ Эквити: ${formula(sp, hit)} ${note}.`, []);
       if (hit !== undefined) {
-        return fb('equity', 'correct', hit === sp.correctOuts ? `✅ Эквити: ${formula(sp, hit)} ${note}.`
-          : `✅ Эквити: ${formula(sp, hit)} ${note} — засчитано (с оверкартами).`, hit === sp.correctOuts ? [] : [`Без оверкарт: ${formula(sp, sp.correctOuts)}.`]);
+        const acc = baseOnly(sp, hit);
+        return fb('equity', acc ? 'acceptable' : 'correct', `${acc ? '⚠️' : '✅'} Эквити: ${formula(sp, hit)} ${note} — засчитано (${altRu(sp, hit)}).`,
+          [`Основной ответ: ${formula(sp, sp.correctOuts)}.`]);
       }
       const own = num(answers.outs), ownOk = Number.isFinite(own) && sp.acceptedOuts.some((a) => Math.abs(own - a) <= 1);
       if (Number.isFinite(own) && Math.abs(x - rule(own)) <= 1) { // the formula was applied right to the player's own count
@@ -3576,8 +3604,8 @@ const Coach = (() => {
       } else if (implOk(sp)) L.push(`Нужно ${showNeed(sp)}, у тебя ${E}%; с неявными шансами хватает ~${pctR(sp.implied.neededImplied)} — колл окупается.`);
       else L.push(`${E}% ${E >= N ? '≥' : '<'} ${showNeed(sp)} — колл ${E >= N ? 'окупается в долгую' : 'в долгую невыгоден'}.`);
       if (overCall(sp)) {
-        const all = o + sp.outs.over;
-        L.push(`С оверкартами (${outsW(all)}) — ${ruleOf(sp)(all)}% ≥ ${showNeed(sp)}: колл тоже допустим, но пара из оверкарты может и не выиграть, а без них у тебя только ${E}%.`);
+        const all = overAll(sp);
+        L.push(`С оверкартами полностью (${outsW(all)}) — ${ruleOf(sp)(all)}% ≥ ${showNeed(sp)}: колл тоже допустим, но пары может не хватить, а по половине у тебя ${E}%.`);
       }
       if (!o && sp.kind === 'nodraw') L.push('У тебя нет ни готовой руки, ни дро — платить не за что.');
       if (o >= 12 && v.raise === B) {
@@ -3716,14 +3744,14 @@ const Coach = (() => {
     if (Math.abs(d) < 3) why = `Правило 2 и 4 работает: разница всего ${U.dec(Math.abs(d), 1)} п.п.`;
     else if (d > 0 && opp.every((h) => sc(spot.hole) > sc(h))) why = 'Реально больше: ты выигрываешь и без попадания — сейчас твоя рука сильнее.';
     else if (d > 0) { // behind now: uncounted cards (dirty outs, overcards …) win as well
-      const counted = new Set(spot.multiway ? spot.outs.cleanList : spot.outs.list), seen = new Set([...spot.hole, ...spot.board, ...opp.flat()]);
+      const counted = new Set([...(spot.multiway ? spot.outs.cleanList : spot.outs.list), ...spot.outs.overList]), seen = new Set([...spot.hole, ...spot.board, ...opp.flat()]);
       const extra = spot.cardsToSee === 1 ? Cards.deck().filter((c) => !seen.has(c) && !counted.has(c) && opp.every((h) => sc(spot.hole, [c]) > sc(h, [c]))) : [];
       why = 'Реально больше: против этих рук выигрывают и карты, которые не вошли в подсчёт.';
       if (extra.length) detail = `Эти карты: ${extra.map(Cards.str).join(', ')}.`;
     } else {
       const parts = [], rival = many ? 'соперников' : 'соперника', strs = (cs) => cs.map(Cards.str).join(', ');
       if (spot.cardsToSee === 1) {
-        const held = new Set(opp.flat()), mine = spot.multiway ? spot.outs.cleanList : spot.outs.list;
+        const held = new Set(opp.flat()), mine = [...(spot.multiway ? spot.outs.cleanList : spot.outs.list), ...spot.outs.overList];
         const nowBest = Math.max(...opp.map((h) => sc(h))), bestWith = (c) => Math.max(...opp.map((h) => sc(h, [c])));
         const blocked = [], ahead = [], split = [], lost = [];
         for (const c of mine) {
@@ -5369,6 +5397,13 @@ const Screens = (() => {
     outs: () => `<p>Аут — карта, которая улучшит твою руку до, скорее всего, лучшей. Шанс поймать аут:</p>
       ${table(['Дро', 'Ауты', 'Одна карта', 'Две карты'], DRAWS.map(([name, o, p1, p2, ex]) => [`${name}<small>${txt(ex.split(' на ').map((g) => g.replace(/ /g, '\u00a0')).join(' на '))}</small>`, o, p1 + '%', p2 + '%']))}
       <p class="sc-note"><b>Как считать.</b> Флеш-дро: в масти 13 карт, 4 ты видишь, осталось 9 аутов. Открытое стрит-дро: по 4 карты с каждой стороны, итого 8.</p>
+      <h3>Ауты до пары</h3>
+      <ul class="sc-rules">
+        <li><b>Оверкарты</b> — твои карты старше всех на борде: по 3 аута за карту. ${txt('A♠\u00a0K♦')} на ${txt('9♥\u00a05♣\u00a02♦')} — 6 аутов.</li>
+        <li><b>Один соперник, ставка меньше ⅔ банка</b> — считай их полностью: флеш-дро + две оверкарты = 9 + 6 = 15.</li>
+        <li><b>Крупная ставка или банк на троих+</b> — половину, по 1,5 за карту: пары туза может не хватить.</li>
+        <li><b>Пара младшей картой — не аут:</b> ${txt('7♠\u00a06♦')} на ${txt('K♣\u00a09♥\u00a02♠')} — пара семёрок проигрывает любой паре старше.</li>
+      </ul>
       <h3>Грязные ауты</h3>
       <p class="sc-note">Аут улучшает тебя, но может дать сопернику руку лучше. Считай так: все ауты − грязные = чистые.</p>
       <ul class="sc-rules">
