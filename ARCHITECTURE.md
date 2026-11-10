@@ -250,3 +250,26 @@ after; board → reactions hidden, missed ones produce a post-hand `Coach.lookHi
 for outs spots, read review, look hints, timing warning, stats, tournament bookkeeping.
 Human decision time = from action panel enabled to click (excluding question time); feed `Coach.timing`
 and pass `human.lastAction.thinkMs` to bots.
+
+## Round 3 additions (user feedback)
+
+- **Feedback** may carry `more: [...]` (collapsed under «Подробнее») and `grid: { key, hl }` (13×13 range grid).
+  Texts: title + ≤ 2 short lines. No range text lists anywhere — grids instead.
+- **Range grid keys** (`Ranges.grid`): position label, `'BB'`, `'limped:POS'`, `'vsRaise:POS:deep|short'`, `'vs3bet:POS'`
+  (plain `'vsRaise'`/`'vs3bet'` still work). `View.rangeGridHTML(key, hl)` renders one.
+  `Ranges.mySituation(hand, seat)` → `{ key, caption, hl }` for the personalized tab.
+  `Screens.rangeModal(opts)` with `opts = { situation, pos, n, hl }` → tabs «Твоя ситуация», «Открытие», «Против лимпа», «Против рейза», «Против 3-бета» (old `(key, title)` form still works).
+- **Every action graded**: `Coach.analyze` returns a spot for every human postflop decision (any street, bet or no bet).
+  `Coach.foldProb(hand, seat, table, betTo)` simulates the real `Bots.decide` to estimate fold equity; bluffs and checks
+  are graded against break-even `bet / (pot + bet)`.
+- **More quizzes**: `Ranges.questions` (preflop pot odds vs a raise), postflop `potodds` on every bet faced, `outs/cards/equity`
+  with any draw, `sizing` (chips for ⅔ pot), `Coach.afterActionQuestions` → `bluff` (break-even fold %). Approximate
+  answers accepted (±3 pp, rounded-number variant, simple fractions). Stats: sizing/bluff → `potodds`.
+- **Teacher**: `Ranges.advise(hand, seat, table)`, `Coach.advise(spot)` → `{ best, size, title, lines, more, grid }`; `UI.showAdvice`.
+- **Tells quiz**: `Coach.tellQuestion(reaction, table)`, `Coach.tellReview(...)`, `Coach.TELLS_GUIDE` (cheat-sheet tab «Теллы»).
+- **Settings keys**: `teacher`, `dealAssist` ('off'|'normal'|'strong', learn/practice only), `heroPos` ('any'|label),
+  `autoSkipFolded`; `practiceFreq` default 75.
+- **Game API**: `Game.skipHand()`, `Game.openRanges()`, `Game.lockPos(label|null)`, `Game.setTeacher(bool)`,
+  `Game.state().canSkip`. Card rigging and position lock live in the controller (engine untouched).
+- Engine extras (from audits): `table.lastBB` (heads-up button rule), `hand.returned[]`, `Engine.legal` → null outside betting,
+  round ends when the only player who can act already covers every live bet.

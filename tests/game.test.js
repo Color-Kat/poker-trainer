@@ -79,3 +79,68 @@ test('ui: side pots never show an uncalled excess', () => {
   h.returned[0] = 500; // after Engine returns it
   assert.deepStrictEqual(UI.sidePots(h), [1200, 1500, 1400]);
 });
+
+test('game: position lock holds for every label on 2..9 players (also with busted bots)', () => {
+  U.seed(11);
+  for (let n = 2; n <= 9; n++) {
+    for (const bust of [false, true]) {
+      const players = Array.from({ length: n }, (_, i) => ({ name: 'P' + i, stack: 2000 }));
+      if (bust && n > 3) { players[2].stack = 0; players[2].busted = true; }
+      const t = Engine.createTable({ players, button: U.randInt(0, n - 1) });
+      const live = players.filter((p) => !p.busted).length;
+      for (const label of Engine.positionNames(live)) {
+        for (let k = 0; k < 30; k++) {
+          assert.ok(Game.lockButton(t, label), `${n}p ${label}`);
+          const h = Engine.startHand(t);
+          assert.strictEqual(h.pos[0], label, `${n} players${bust ? ' (1 busted)' : ''}, hand ${t.handNo}`);
+        }
+      }
+      if (live < 9) assert.strictEqual(Game.buttonFor(t, 'UTG'), null, 'no UTG at this size');
+    }
+  }
+  U.seed(null);
+});
+
+test('game: training deal keeps the deck a valid permutation and bots keep their cards', () => {
+  U.seed(5);
+  const tags = {}, codes = {};
+  let rigged = 0;
+  for (let k = 0; k < 400; k++) {
+    const players = Array.from({ length: 9 }, (_, i) => ({ name: 'P' + i, stack: 2000 }));
+    const t = Engine.createTable({ players, button: k % 9 });
+    const h = Engine.startHand(t);
+    const bots = h.hole.map((c, s) => (s && c ? c.join() : null));
+    const code = Game.rigHole(h, 'normal');
+    if (code) { rigged++; codes[code] = 1; assert.strictEqual(Cards.handCode(h.hole[0][0], h.hole[0][1]), code); }
+    h.hole.forEach((c, s) => { if (s) assert.strictEqual(c ? c.join() : null, bots[s], 'bot hole untouched'); });
+    const all = h.deck.concat(...h.hole.filter(Boolean));
+    assert.strictEqual(new Set(all).size, 52, 'no duplicates, nothing lost');
+    // postflop: the flop then the turn
+    for (const street of ['preflop', 'flop']) {
+      h.street = street;
+      const tag = Game.rigBoard(h, 'strong');
+      if (tag) tags[tag] = (tags[tag] || 0) + 1;
+      const n = street === 'preflop' ? 3 : 1, cards = h.deck.slice(-n);
+      if (tag) assert.ok(Game.spotTags(h.hole[0], h.board.concat(cards.reverse())).includes(tag), tag);
+      for (let i = 0; i < n; i++) h.board.push(h.deck.pop());
+      assert.strictEqual(new Set(h.deck.concat(h.board, ...h.hole.filter(Boolean))).size, 52);
+    }
+  }
+  assert.ok(rigged > 200 && rigged < 290, 'normal ≈ 60% rigged: ' + rigged);
+  assert.ok(Object.keys(codes).length > 40, 'varied hands');
+  for (const t of ['flushdraw', 'oesd', 'gutshot', 'toppair', 'secondpair', 'overcards']) assert.ok(tags[t] > 5, t + ': ' + JSON.stringify(tags));
+  assert.strictEqual(Game.rigHole({ hole: [[0, 1]], deck: [], pos: [] }, 'off'), null);
+  U.seed(null);
+});
+
+test('game: spot tags', () => {
+  const C = (s) => Cards.parseList(s);
+  assert.deepStrictEqual(Game.spotTags(C('A♥ K♥'), C('Q♥ 7♥ 2♣')), ['flushdraw', 'overcards']);
+  assert.deepStrictEqual(Game.spotTags(C('9♠ 8♦'), C('7♣ 6♥ K♦')), ['oesd']);
+  assert.deepStrictEqual(Game.spotTags(C('9♠ 8♦'), C('7♣ 5♥ K♦')), ['gutshot']);
+  assert.deepStrictEqual(Game.spotTags(C('9♥ 8♥'), C('7♥ 6♥ K♦')), ['combo']);
+  assert.deepStrictEqual(Game.spotTags(C('K♠ J♦'), C('K♣ 7♥ 2♦')), ['toppair']);
+  assert.deepStrictEqual(Game.spotTags(C('A♠ 7♦'), C('K♣ 7♥ 2♦')), ['secondpair']);
+  assert.deepStrictEqual(Game.spotTags(C('A♠ Q♦'), C('J♣ 7♥ 2♦')), ['overcards']);
+  assert.deepStrictEqual(Game.spotTags(C('5♠ 4♦'), C('J♣ 9♥ 2♦')), []);
+});

@@ -37,7 +37,14 @@ const Ranges = (() => {
   const SUITED_CALL = set('AQs, AJs, KQs'), CONNECTORS = set('76s, 87s, 98s, T9s, JTs, QJs'), VS_BORDER = set('AQo, ATs, KJs');
   const VS_CALL = set('JJ-22, AQs, AJs, KQs, 76s, 87s, 98s, T9s, JTs, QJs');
   const isLate = (pos) => pos === 'BTN' || pos === 'CO';
-  const VS_RAISE_TEXT = 'Против рейза: 3-бет — QQ+, AK; колл — JJ–22 (маленькие пары — если стек ≥ 20 рейзов), AQs, AJs, KQs, одномастные коннекторы 76s+ (только на BTN/CO); остальное — сброс.';
+  const VS_RAISE_TEXT = 'Против рейза играют узко: 3-бет с лучшими руками, колл с парами и сильными одномастными, коннекторы — только на BTN/CO, маленькие пары — только при стеке ≥ 20 рейзов.';
+  // Feedback shape (shared with Coach): at most 2 short lines, everything else under «Подробнее».
+  const MAXLEN = 100;
+  function pack(all) {
+    const lines = [], more = [];
+    for (const l of all.filter(Boolean)) (lines.length < 2 && l.length <= MAXLEN ? lines : more).push(l);
+    return more.length ? { lines, more } : { lines };
+  }
 
   const POS_INFO = {
     UTG: { group: 'Ранняя', text: 'Ранняя позиция: ты ходишь одним из первых, а после тебя почти весь стол. Играй только сильные руки — у кого-то сзади легко окажется рука лучше, а после флопа ты будешь без позиции.' },
@@ -101,39 +108,39 @@ const Ranges = (() => {
   const priceText = (sit) => `доплатить нужно всего ${U.fmt(Math.min(sit.toCall, sit.stack))} при банке ${U.fmt(sit.pot)}`;
   const V = (best, fold, call, raise, check) => ({ best, v: check ? { fold, check, raise } : { fold, call, raise } });
 
-  // Verdicts by the SPEC tables + explanation lines (independent of the action actually taken).
+  // Verdicts by the SPEC tables + explanation (independent of the action actually taken).
+  // why = short lines (no range lists: the grid shows the range), more = details.
   function decide(sit, code, hand, table) {
     const { kind, pos } = sit;
     const pair = code.length === 2, C = cap(codeRu(code));
     const enters = (yes) => (yes ? '' : 'не ') + (pair ? 'входит' : 'входят');
-    const text = OPEN_TEXT[pos] || CO_TEXT;
-    const why = [];
+    const why = [], more = [];
+    const rName = () => { const p = table && table.players[sit.raiser]; return p ? p.name : 'Соперник'; };
     let d;
     if (kind === 'open') {
-      if (open(pos).has(code)) { d = V('raise', M, M, B); why.push(`${C} ${enters(true)} в диапазон этой позиции (${text}) — открывай рейзом.`); }
-      else if (border(pos).has(code)) { d = V('fold', B, M, OK); why.push(`${C} — рука на границе диапазона: в таблице этой позиции (${text}) её нет, но она соседняя. Рейз допустим, надёжнее — сбросить.`); }
-      else { d = V('fold', B, M, M); why.push(`${C} ${enters(false)} в диапазон этой позиции (${text}).`); }
+      if (open(pos).has(code)) { d = V('raise', M, M, B); why.push(`${C} ${enters(true)} в диапазон ${pos} — открывай рейзом.`); }
+      else if (border(pos).has(code)) { d = V('fold', B, M, OK); why.push(`${C} — на границе диапазона ${pos}: рейз допустим, надёжнее сброс.`); }
+      else { d = V('fold', B, M, M); why.push(`${C} ${enters(false)} в диапазон ${pos} — сброс.`); }
     } else if (kind === 'limped') {
       const { hi, lo, type } = Cards.codeInfo(code);
       const speculative = pair || (type === 's' && (hi === 14 || (hi - lo === 1 && lo >= 4)));
       const limp = speculative && (isLate(pos) || pos === 'SB') ? OK : M;
-      why.push(`Перед тобой ${U.nplural(sit.limpers, 'лимпер', 'лимпера', 'лимперов')}: ${sit.limpers > 1 ? 'игроки просто уравняли' : 'игрок просто уравнял'} большой блайнд.`);
-      if (open(pos).has(code)) { d = V('raise', M, limp, B); why.push(`${C} ${enters(true)} в диапазон ${pos} (${text}) — рейзи: изолируй лимперов и забери инициативу.`); }
-      else { d = V('fold', B, limp, border(pos).has(code) ? OK : M); why.push(`${C} ${enters(false)} в диапазон ${pos} (${text}).`); }
-      if (limp === OK) why.push('Доплатить (оверлимп) допустимо: пары, одномастные коннекторы и одномастные тузы в поздней позиции и на малом блайнде дёшево смотрят флоп.');
+      more.push(`Перед тобой ${U.nplural(sit.limpers, 'лимпер', 'лимпера', 'лимперов')}: ${sit.limpers > 1 ? 'игроки просто уравняли' : 'игрок просто уравнял'} большой блайнд.`);
+      if (open(pos).has(code)) { d = V('raise', M, limp, B); why.push(`${C} ${enters(true)} в диапазон ${pos} — рейзи: изолируй лимперов.`); }
+      else { d = V('fold', B, limp, border(pos).has(code) ? OK : M); why.push(`${C} ${enters(false)} в диапазон ${pos}.`); }
+      if (limp === OK) more.push('Доплатить (оверлимп) допустимо: пары, одномастные коннекторы и одномастные тузы в поздней позиции и на малом блайнде дёшево смотрят флоп.');
     } else if (kind === 'bbOption') {
       const inCO = open('CO').has(code);
       d = V(inCO ? 'raise' : 'check', M, null, inCO ? B : M, B);
-      why.push('Никто не повышал — ты на большом блайнде и можешь бесплатно посмотреть флоп.');
-      why.push(inCO ? `${C} ${enters(true)} в диапазон CO (${CO_TEXT}) — можно повысить, чек тоже верен.`
-        : `${C} ${enters(false)} в диапазон CO (${CO_TEXT}) — повышать незачем, просто чек.`);
+      why.push(inCO ? `${C} ${enters(true)} в диапазон CO — можно повысить, чек тоже верен.` : `${C} ${enters(false)} в диапазон CO — просто чек.`);
+      more.push('Никто не повышал — ты на большом блайнде и можешь бесплатно посмотреть флоп.');
     } else if (kind === 'vsRaise') {
-      const late = isLate(pos), p = table && table.players[sit.raiser];
-      why.push(`${p ? p.name : 'Соперник'} (${hand.pos[sit.raiser]}) повышает до ${U.fmt(sit.raiseTo)}.`);
+      const late = isLate(pos);
+      more.push(`${rName()} (${hand.pos[sit.raiser]}) повышает до ${U.fmt(sit.raiseTo)}.`);
       if (PREMIUM.has(code)) {
         d = V('raise', M, OK, B);
-        why.push(sit.canRaise ? 'QQ+ и AK против рейза — 3-бет (ререйз): строй банк с лучшей рукой. Колл тоже допустим.'
-          : 'QQ+ и AK — лучшие руки против рейза. Повысить уже нельзя, так что просто колл.');
+        why.push(sit.canRaise ? 'Лучшие руки против рейза — 3-бет: строй банк. Колл тоже допустим.'
+          : 'Лучшая рука против рейза, но повысить уже нельзя — колл.');
       } else if (SMALL_PAIRS.has(code)) {
         const deep = sit.effStack >= 20 * sit.raiseTo;
         d = deep ? V('call', M, B, M) : V('fold', B, M, M);
@@ -141,38 +148,39 @@ const Ranges = (() => {
       } else if (PAIRS.has(code)) {
         const jt = code === 'JJ' || code === 'TT';
         d = V('call', M, B, jt ? OK : M);
-        why.push(`Пары JJ–22 против рейза — колл${jt ? ' (3-бет с JJ и TT тоже допустим)' : ''}.`);
+        why.push(`${C} против рейза — колл${jt ? ' (3-бет тоже допустим)' : ''}.`);
       } else if (SUITED_CALL.has(code)) {
         const aq = code === 'AQs';
         d = V('call', M, B, aq ? OK : M);
         why.push(`${C} против рейза — колл${aq ? ' (3-бет тоже допустим)' : ''}.`);
       } else if (CONNECTORS.has(code) && late) {
         d = V('call', M, B, M);
-        why.push('Одномастные коннекторы 76s+ на BTN/CO — колл: ты в позиции, и рука хорошо собирает стриты и флеши.');
+        why.push('Одномастные коннекторы на BTN/CO — колл: ты в позиции, рука собирает стриты и флеши.');
       } else if (VS_BORDER.has(code) || (code === 'QJs' && !late) || (code === '65s' && late)) {
         d = V('fold', B, OK, M);
-        why.push(`${C} — рука на границе: колл допустим, но по таблице это сброс.`);
+        why.push(`${C} — на границе: колл допустим, но по таблице сброс.`);
       } else {
         d = V('fold', B, M, M);
         why.push(CONNECTORS.has(code) ? 'Одномастные коннекторы против рейза коллируют только на BTN/CO — здесь сброс.'
-          : `${C} ${enters(false)} в список рук для игры против рейза — сброс.`);
+          : `${C} ${enters(false)} в руки для игры против рейза — сброс.`);
       }
       // BB against a steal (late position, or any raise at a table of 2–3): the blind is already in and the BB closes
       // the action, so a call with a hand from the raiser's own opening range is fine (heads-up: correct).
       const rPos = hand.pos && hand.pos[sit.raiser], steal = sit.n <= 3 || ['CO', 'BTN', 'SB'].includes(rPos);
       if (pos === 'BB' && steal && sit.raises === 1 && d.v.call === M && sit.price <= 0.3 && open(rPos).has(code)) {
         d = sit.n <= 3 ? V('call', OK, B, d.v.raise) : V('fold', B, OK, d.v.raise);
-        why.push(`Но на BB ты уже вложил блайнд и закрываешь торговлю: против рейза с ${rPos} (оттуда открывают широко) ` +
+        why.unshift(`Но на BB против рейза с ${rPos} колл ${sit.n <= 3 ? 'верен' : 'допустим'}: доплата — ${U.pctNum(sit.price * 100)} банка.`);
+        more.push(`Но на BB ты уже вложил блайнд и закрываешь торговлю: против рейза с ${rPos} (оттуда открывают широко) ` +
           `${C} — колл ${sit.n <= 3 ? 'верен' : 'допустим'}: доплатить нужно ${U.pctNum(sit.price * 100)} от итогового банка.`);
       }
-      why.push(VS_RAISE_TEXT);
+      more.push(VS_RAISE_TEXT);
     } else if (kind === 'vs3bet') {
       if (PREMIUM.has(code)) {
         d = V('raise', M, OK, B);
-        why.push(sit.canRaise ? 'Против рейза и ререйза продолжай только с QQ+ и AK: лучше ещё один ререйз, колл допустим.'
-          : 'Против рейза и ререйза продолжай только с QQ+ и AK. Повысить уже нельзя, так что просто колл.');
-      } else if (code === 'JJ' || code === 'AQs') { d = V('fold', B, OK, M); why.push(`Против рейза и ререйза играют только QQ+ и AK. ${C} — на границе: колл допустим, но надёжнее сбросить.`); }
-      else { d = V('fold', B, M, M); why.push('Против рейза и ререйза играют только QQ+ и AK, остальное — сброс.'); }
+        why.push(sit.canRaise ? 'Против 3-бета продолжают только QQ+ и AK: ещё ререйз, колл допустим.'
+          : 'Против 3-бета продолжают только QQ+ и AK. Повысить уже нельзя — колл.');
+      } else if (code === 'JJ' || code === 'AQs') { d = V('fold', B, OK, M); why.push(`Против 3-бета играют только QQ+ и AK. ${C} — на границе: колл допустим.`); }
+      else { d = V('fold', B, M, M); why.push('Против 3-бета играют только QQ+ и AK — сброс.'); }
     } else {
       d = { best: 'check', v: { check: B } };
       why.push('Все сбросили — банк твой без борьбы.');
@@ -184,12 +192,28 @@ const Ranges = (() => {
     // The tables assume a normal raise. Against a short shove, or when the call is the hero's last chips,
     // there is no more betting: a tiny price makes calling right with almost anything.
     if (cheapAllIn(sit) && d.best === 'fold') {
-      const p = table && table.players[sit.raiser];
       d = { best: 'call', v: { ...d.v, fold: M, call: B } };
-      why.push(`${sit.allIn ? `${p ? p.name : 'Соперник'} идёт олл-ин` : 'Твой колл — это олл-ин'}, и ${priceText(sit)}: ` +
+      why.unshift(`Олл-ин: доплатить ${U.fmt(Math.min(sit.toCall, sit.stack))} при банке ${U.fmt(sit.pot)} — хватит ${U.pctNum(sit.price * 100)} эквити. Колл.`);
+      more.push(`${sit.allIn ? `${rName()} идёт олл-ин` : 'Твой колл — это олл-ин'}, и ${priceText(sit)}: ` +
         `хватит ${U.pctNum(sit.price * 100)} эквити — столько есть почти у любой руки. Колл.`);
     }
-    return { ...d, why };
+    return { ...d, why, more };
+  }
+
+  // The grid that matches the verdict of this situation (see grid()).
+  function gridKey(sit) {
+    const k = sit.kind;
+    if (k === 'vsRaise') return `vsRaise:${sit.pos}:${sit.effStack >= 20 * sit.raiseTo ? 'deep' : 'short'}`;
+    if (k === 'vs3bet') return 'vs3bet:' + sit.pos;
+    if (k === 'limped') return 'limped:' + sit.pos;
+    return k === 'bbOption' ? 'BB' : sit.pos;
+  }
+  const CAPTION = { open: 'открытие', limped: 'против лимпа', bbOption: 'BB без повышения', vsRaise: 'против рейза', vs3bet: 'против 3-бета', walk: 'все сбросили' };
+  // For the range browser: the hero's own preflop situation (works on later streets too).
+  function mySituation(hand, seat) {
+    if (!hand || !hand.hole || !hand.hole[seat]) return null;
+    const sit = situation(hand, seat), hl = Cards.handCode(hand.hole[seat][0], hand.hole[seat][1]);
+    return { key: gridKey(sit), caption: `${sit.pos}: ${CAPTION[sit.kind] || ''}`, hl };
   }
 
   const NOUN = { fold: 'сброс', check: 'чек', call: 'колл', raise: 'рейз' };
@@ -214,68 +238,112 @@ const Ranges = (() => {
     const verdict = vd === B ? 'correct' : vd === OK ? 'acceptable' : 'mistake';
     const alts = Object.keys(d.v).filter((a) => a !== d.best && d.v[a] === B);
     const right = inf(d.best, sit.kind) + (alts.length ? ` (или ${alts.map((a) => inf(a, sit.kind)).join(', ')})` : '');
-    const lines = [posLine(sit), ...d.why];
+    const special = [];
     const inRange = open(sit.pos).has(code) || border(sit.pos).has(code);
-    if (vd === M && t === 'call' && sit.kind === 'open' && inRange) lines.push('Лимп отдаёт инициативу — либо рейз, либо сброс.');
+    if (vd === M && t === 'call' && sit.kind === 'open' && inRange) special.push('Лимп отдаёт инициативу — либо рейз, либо сброс.');
     if (vd === M && t === 'call' && sit.kind === 'limped') {
-      lines.push(open(sit.pos).has(code) ? 'Не доплачивай с такой рукой — рейзи: так ты изолируешь лимперов и берёшь инициативу.'
+      special.push(open(sit.pos).has(code) ? 'Не доплачивай с такой рукой — рейзи: изолируй лимперов и бери инициативу.'
         : 'Доплачивать с такой рукой — лишние потери: она слабая и без потенциала.');
     }
-    if (t === 'fold' && sit.kind === 'bbOption') lines.push('Никогда не сбрасывай, когда можно бесплатно чекнуть.');
-    if (verdict === 'mistake') lines.push(`Правильно: ${right}.`);
-    if (verdict === 'acceptable') lines.push(`Лучше: ${right}.`);
+    if (t === 'fold' && sit.kind === 'bbOption') special.push('Никогда не сбрасывай, когда можно бесплатно чекнуть.');
+    if (verdict === 'acceptable') special.push(`Лучше: ${right}.`);
     const title = verdict === 'correct' ? `✅ Префлоп: ${noun(t, sit.kind)} — верно.`
       : verdict === 'acceptable' ? `⚠️ Префлоп: ${noun(t, sit.kind)} — допустимо.`
       : `❌ Префлоп: ты сыграл «${noun(t, sit.kind)}», правильно — ${right}.`;
-    return { kind: 'preflop', verdict, ok: verdict !== 'mistake', title, lines, best: d.best, verdicts: d.v, pos: sit.pos, code, situation: sit };
+    const p = pack([d.why[0], ...special, ...d.why.slice(1)]);
+    return { kind: 'preflop', verdict, ok: verdict !== 'mistake', title, lines: p.lines, more: [posLine(sit), ...(p.more || []), ...d.more],
+      grid: { key: gridKey(sit), hl: code }, best: d.best, verdicts: d.v, pos: sit.pos, code, situation: sit };
   }
 
-  // Learning-mode hint before acting: what the position means, the situation, the range — no verdict.
+  // Learning-mode hint before acting: what the position means, the situation, the grid — no verdict.
   function hint(hand, seat, table) {
-    const s = situation(hand, seat), hole = hand.hole[seat];
-    const C = codeRu(Cards.handCode(hole[0], hole[1]));
+    const s = situation(hand, seat), hole = hand.hole[seat], code = Cards.handCode(hole[0], hole[1]);
+    const C = codeRu(code);
     const info = POS_INFO[s.pos] || { group: 'Блайнд', text: '' };
-    const lines = [info.text];
-    const ask = (where) => `Спроси себя: есть ли твоя рука (${C}) ${where}?`;
-    const behind = s.playersAfter ? ` И сколько игроков после тебя (${s.playersAfter}) ещё могут проснуться с сильной рукой?` : '';
-    if (s.kind === 'open') {
-      lines.push(`До тебя все сбросили — ты открываешь торговлю. Диапазон открытия ${s.pos}: ${OPEN_TEXT[s.pos]}.`, ask('в этом диапазоне') + behind);
-    } else if (s.kind === 'limped') {
-      lines.push(`Перед тобой ${U.nplural(s.limpers, 'лимпер', 'лимпера', 'лимперов')}. С рукой из диапазона ${s.pos} (${OPEN_TEXT[s.pos]}) — рейз; пары, одномастные коннекторы и одномастные тузы в поздней позиции можно доплатить; остальное — сброс.`,
-        ask('в этом диапазоне') + ' Если нет — стоит ли она того, чтобы доплачивать?');
-    } else if (s.kind === 'bbOption') {
-      lines.push(`Никто не повышал — чек бесплатный. Повышать стоит с руками из диапазона CO: ${CO_TEXT}.`, ask('в диапазоне CO') + ' Если нет — просто чек, сбрасывать нельзя.');
-    } else if (s.kind === 'vsRaise') {
-      const p = table && table.players[s.raiser], small = SMALL_PAIRS.has(Cards.handCode(hole[0], hole[1]));
-      lines.push(`${p ? p.name : 'Соперник'} (${hand.pos[s.raiser]}) повышает до ${U.fmt(s.raiseTo)}. Против рейза играют гораздо уже, чем при открытии. ${VS_RAISE_TEXT}`,
-        ask('в этом списке') + (small ? ` Для маленькой пары проверь стек: нужно ≥ 20 рейзов соперника (у тебя ${Math.floor(s.effStack / s.raiseTo)}).` : ''));
-    } else if (s.kind === 'vs3bet') {
-      lines.push('Был рейз и ререйз — дальше играют только QQ+ и AK.', ask('среди них'));
-    } else {
-      lines.push('Все сбросили — банк твой.');
-    }
-    if (cheapAllIn(s)) lines.push(`Но это олл-ин, и ${priceText(s)} — сравни цену с шансами банка, прежде чем сбрасывать.`);
+    const lines = [];
+    const ask = (where) => `Найди свою руку (${C}) на сетке ${where}.`;
+    if (s.kind === 'open') lines.push('До тебя все сбросили — ты открываешь торговлю.', ask(`диапазона ${s.pos}`));
+    else if (s.kind === 'limped') lines.push(`Перед тобой ${U.nplural(s.limpers, 'лимпер', 'лимпера', 'лимперов')}: с рукой из диапазона — рейз.`, ask(`диапазона ${s.pos}`));
+    else if (s.kind === 'bbOption') lines.push('Никто не повышал — чек бесплатный, сбрасывать нельзя.', ask('диапазона CO: если она там — можно рейз'));
+    else if (s.kind === 'vsRaise') {
+      const p = table && table.players[s.raiser], small = SMALL_PAIRS.has(code);
+      lines.push(`${p ? p.name : 'Соперник'} (${hand.pos[s.raiser]}) повышает до ${U.fmt(s.raiseTo)} — играют гораздо уже.`,
+        small ? `Маленькая пара: нужно ≥ 20 рейзов соперника в стеке (у тебя ${Math.floor(s.effStack / s.raiseTo)}).` : ask('против рейза'));
+    } else if (s.kind === 'vs3bet') lines.push('Был рейз и ререйз — дальше играют только QQ+ и AK.', ask('против 3-бета'));
+    else lines.push('Все сбросили — банк твой.');
+    const more = [info.text];
+    if (cheapAllIn(s)) lines.unshift(`Олл-ин: ${priceText(s)} — сравни цену с шансами банка.`);
     const group = info.group === 'Блайнд' ? 'блайнд' : info.group.toLowerCase() + ' позиция';
-    return { title: `💡 Подсказка: ${s.pos} — ${group}`, lines };
+    return { title: `💡 Подсказка: ${s.pos} — ${group}`, ...pack(lines), more, grid: { key: gridKey(s), hl: code } };
+  }
+
+  // ---------- preflop pot-odds question (facing a raise / all-in) ----------
+  function potSpot(hand, seat) {
+    const s = situation(hand, seat), call = Math.min(s.toCall, s.stack);
+    return { pre: true, pot: s.pot, toCall: call, betTo: s.raiseTo, needed: s.price * 100, potStart: s.pot, myBet: 0, short: false };
+  }
+  function questions(hand, seat, table, settings) {
+    const on = (settings && settings.questions) || {};
+    if (!hand || hand.street !== 'preflop' || on.potodds === false || !hand.hole[seat]) return [];
+    const s = situation(hand, seat);
+    if (!s.toCall || !(s.raises || s.allIn)) return [];
+    const spot = potSpot(hand, seat);
+    return [{ id: 'potodds', type: 'number', prompt: 'Какой процент нужен по шансам банка?', unit: '%', spot,
+      info: { pot: spot.pot, bet: s.raiseTo, toCall: spot.toCall },
+      hint: 'Нужный % = твой колл ÷ (банк вместе со ставками + твой колл) × 100. Можно округлять.' }];
+  }
+  // Answer check for questions(): the same grading as postflop (Coach.check), on the preflop pot.
+  const check = (hand, seat, qid, value) => (typeof Coach !== 'undefined' ? Coach.check(potSpot(hand, seat), qid, value) : null);
+
+  // ---------- teacher: the best action before the hero acts ----------
+  const nice = (x, bb) => { const st = Math.max(1, bb / 2); return Math.round(x / st) * st; };
+  function advise(hand, seat, table) {
+    const hole = hand.hole[seat];
+    if (!hole || hand.street !== 'preflop') return null;
+    const sit = situation(hand, seat), code = Cards.handCode(hole[0], hole[1]);
+    const d = decide(sit, code, hand, table);
+    const heroIn = hand.startStacks[seat] - sit.stack, maxTo = heroIn + sit.stack, bb = hand.bb;
+    let size;
+    if (d.best === 'raise') {
+      const want = sit.kind === 'vsRaise' ? 3 * sit.raiseTo : sit.kind === 'vs3bet' ? 2.5 * sit.raiseTo : (3 + sit.limpers) * bb;
+      size = Math.min(maxTo, nice(want, bb));
+      if (size > 0.4 * maxTo) size = maxTo; // a big part of the stack: just all-in
+    }
+    const stackPct = (x) => U.pctNum((100 * x) / Math.max(1, hand.startStacks[seat]));
+    const call = Math.min(sit.toCall, sit.stack);
+    const risk = d.best === 'raise' ? `Риск: ${U.fmt(size - heroIn)} — ${stackPct(size - heroIn)} стека${sit.playersAfter ? `; после тебя ${sit.playersAfter} — могут ответить силой` : ''}.`
+      : d.best === 'call' ? `Риск: ${U.fmt(call)} — ${stackPct(call)} стека; нужно ${U.pctNum(sit.price * 100)} эквити.`
+      : d.best === 'check' ? 'Чек бесплатный — флоп даром.' : heroIn ? `Сброс: теряешь только уже вложенные ${U.fmt(heroIn)}.` : 'Сброс ничего не стоит.';
+    const alt = Object.keys(d.v).filter((a) => a !== d.best && (d.v[a] === B || d.v[a] === OK));
+    const altLine = alt.length ? `${cap(alt.map((a) => noun(a, sit.kind)).join(' или '))} тоже нормально.` : null;
+    const what = noun(d.best, sit.kind) + (size ? ` до ${U.fmt(size)}` : '');
+    return { best: d.best, size, title: `👨‍🏫 Лучше: ${what}`, lines: [d.why[0], risk, altLine].filter(Boolean),
+      more: [...d.why.slice(1), ...d.more], grid: { key: gridKey(sit), hl: code } };
   }
 
   // 13 rows × 13 cells {code, cls} in Cards.gridCode order (row i, column j).
-  // key: a position, 'vsRaise' / 'vs3bet', or 'vsRaise:MP' (the hero's position). ctx = { pos, deep } (optional:
-  // deep = stack ≥ 20 raises). Against a raise the cells come from decide(), so the grid matches the verdict;
-  // without a position or stack the conditional hands (connectors, small pairs, borderline calls) are 'border'.
+  // key: a position; 'vsRaise' / 'vs3bet' / 'limped' (+ ':POS', vsRaise also ':deep' | ':short' = stack ≥ 20 raises);
+  // ctx = { pos, deep } (optional, overrides the key). Against a raise the cells come from decide(), so the grid
+  // matches the verdict; without a position or stack the conditional hands are 'border'.
   function grid(key, ctx = {}) {
-    const [kind, kpos] = String(key).split(':'), pos = ctx.pos || kpos, deep = ctx.deep;
+    const [kind, kpos, kdeep] = String(key).split(':'), pos = ctx.pos || kpos;
+    const deep = ctx.deep !== undefined ? ctx.deep : kdeep === 'deep' ? true : kdeep === 'short' ? false : undefined;
+    const fake = (k) => ({ kind: k, pos: pos || 'MP', n: 9, raises: k === 'vs3bet' ? 2 : k === 'vsRaise' ? 1 : 0, raiser: 1, raiseTo: 1, limpers: 1,
+      effStack: deep === false ? 1 : 100, canRaise: true, toCall: 1, stack: 100, price: 0.5, allIn: false });
     const vs = (code) => {
-      const sit = { kind, pos: pos || 'MP', n: 9, raises: kind === 'vs3bet' ? 2 : 1, raiser: 1, raiseTo: 1, effStack: deep === false ? 1 : 100,
-        canRaise: true, toCall: 1, stack: 100, price: 0.5, allIn: false };
-      const d = decide(sit, code, { pos: {} }, null);
+      const d = decide(fake(kind), code, { pos: {} }, null);
       if (d.best === 'raise') return 'raise';
       if (!pos && kind === 'vsRaise' && (CONNECTORS.has(code) || VS_BORDER.has(code) || code === '65s')) return 'border';
       if (kind === 'vsRaise' && deep === undefined && SMALL_PAIRS.has(code)) return 'border';
       return d.best === 'call' ? 'call' : d.v.call === OK ? 'border' : 'out';
     };
+    const limped = (code) => {
+      const d = decide(fake('limped'), code, { pos: {} }, null);
+      return d.best === 'raise' ? 'raise' : d.v.call === OK ? 'call' : d.v.raise === OK ? 'border' : 'out';
+    };
     const cls = (code) => {
       if (kind === 'vsRaise' || kind === 'vs3bet') return vs(code);
+      if (kind === 'limped') return limped(code);
       return open(key).has(code) ? 'in' : border(key).has(code) ? 'border' : 'out';
     };
     return Array.from({ length: 13 }, (_, i) => Array.from({ length: 13 }, (_, j) => {
@@ -284,5 +352,6 @@ const Ranges = (() => {
     }));
   }
 
-  return { OPEN_TEXT, POS_INFO, VS_RAISE_TEXT, open, border, situation, evaluate, hint, grid, codeRu };
+  return { OPEN_TEXT, POS_INFO, VS_RAISE_TEXT, open, border, situation, evaluate, hint, grid, gridKey, mySituation, codeRu,
+    questions, check, potSpot, advise, pack };
 })();

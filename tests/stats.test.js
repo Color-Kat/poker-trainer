@@ -28,7 +28,7 @@
     assert.strictEqual(s.startBB, 100);
     assert.strictEqual(s.levelHands, 10);
     assert.strictEqual(s.speed, 'normal');
-    assert.strictEqual(s.practiceFreq, 50);
+    assert.strictEqual(s.practiceFreq, Settings.DEFAULTS.practiceFreq);
     assert.strictEqual(s.botsMode, 'manual');
     assert.deepStrictEqual(s.botStyles.slice(0, 3), ['maniac', 'station', 'reg']);
     assert.strictEqual(s.botStyles.length, 8);

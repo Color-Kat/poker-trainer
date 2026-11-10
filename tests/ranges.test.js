@@ -24,6 +24,7 @@
   }
   const ev = ({ hand, table }, type) => Ranges.evaluate(hand, 0, { type }, table);
   const verdict = (s, type) => ev(s, type).verdict;
+  const all = (fb) => [...fb.lines, ...(fb.more || [])];
 
   test('ranges: SPEC 6.1 table texts, SB/BB = CO, borders one step below', () => {
     const T = Ranges.OPEN_TEXT;
@@ -89,7 +90,7 @@
     const hu = at(2, 'BB', 'Kd Qc', ['raise:50']);
     const e = ev(hu, 'call');
     assert.strictEqual(e.verdict, 'correct');
-    assert.ok(e.lines.some((l) => l.startsWith('Но на BB ты уже вложил блайнд и закрываешь торговлю')), e.lines.join('\n'));
+    assert.ok(all(e).some((l) => l.startsWith('Но на BB ты уже вложил блайнд и закрываешь торговлю')), e.lines.join('\n'));
     assert.strictEqual(verdict(hu, 'fold'), 'acceptable');
     assert.strictEqual(verdict(at(2, 'BB', '7c 2d', ['raise:50']), 'call'), 'mistake'); // not in the BTN range
     // 9-max: everybody folds to the BTN, who raises; the BB calls A9o
@@ -113,11 +114,9 @@
     assert.strictEqual(fb.best, 'fold');
     assert.strictEqual(fb.code, 'KJo');
     assert.strictEqual(fb.title, '❌ Префлоп: ты сыграл «колл», правильно — сбросить.');
-    assert.deepStrictEqual(fb.lines, [
-      'Ты на позиции UTG за столом на 9. После тебя ещё 8 игроков.',
-      'K-J разномастные не входят в диапазон этой позиции (77+, AJs+, AQo+, KQs).',
-      'Правильно: сбросить.',
-    ]);
+    assert.deepStrictEqual(fb.lines, ['K-J разномастные не входят в диапазон UTG — сброс.']);
+    assert.strictEqual(fb.more[0], 'Ты на позиции UTG за столом на 9. После тебя ещё 8 игроков.');
+    assert.deepStrictEqual(fb.grid, { key: 'UTG', hl: 'KJo' });
     assert.strictEqual(verdict(s, 'fold'), 'correct');
     assert.strictEqual(verdict(s, 'raise'), 'mistake');
   });
@@ -128,14 +127,14 @@
     assert.strictEqual(verdict(aq, 'fold'), 'mistake');
     const limp = ev(aq, 'call');
     assert.strictEqual(limp.verdict, 'mistake');
-    assert.ok(limp.lines.includes('Лимп отдаёт инициативу — либо рейз, либо сброс.'));
-    assert.ok(limp.lines.includes('A-Q одномастные входят в диапазон этой позиции (77+, AJs+, AQo+, KQs) — открывай рейзом.'));
+    assert.ok(all(limp).includes('Лимп отдаёт инициативу — либо рейз, либо сброс.'));
+    assert.ok(all(limp).includes('A-Q одномастные входят в диапазон UTG — открывай рейзом.'));
     const sixes = at(9, 'UTG+1', '6s 6d');
     const b = ev(sixes, 'raise');
     assert.strictEqual(b.verdict, 'acceptable');
     assert.strictEqual(b.title, '⚠️ Префлоп: рейз — допустимо.');
-    assert.ok(b.lines.some((l) => l.includes('рука на границе диапазона')));
-    assert.ok(b.lines.some((l) => l.startsWith('Пара шестёрок')));
+    assert.ok(all(b).some((l) => l.includes('на границе диапазона UTG+1')));
+    assert.ok(all(b).some((l) => l.startsWith('Пара шестёрок')));
     assert.strictEqual(verdict(sixes, 'fold'), 'correct');
     assert.strictEqual(verdict(sixes, 'call'), 'mistake');
     // CO: J8s is border (one step below J9s+), J7s is out
@@ -144,8 +143,8 @@
     // SB opens with the CO range; one player behind
     const sb = at(9, 'SB', 'Kh 9h');
     assert.strictEqual(verdict(sb, 'raise'), 'correct');
-    assert.ok(ev(sb, 'raise').lines[0].endsWith('После тебя ещё 1 игрок.'));
-    assert.ok(ev(at(9, 'CO', 'Ah Ad'), 'raise').lines[0].endsWith('После тебя ещё 3 игрока.'));
+    assert.ok(ev(sb, 'raise').more[0].endsWith('После тебя ещё 1 игрок.'));
+    assert.ok(ev(at(9, 'CO', 'Ah Ad'), 'raise').more[0].endsWith('После тебя ещё 3 игрока.'));
   });
 
   test('ranges: 6-handed — the first position (LJ) uses the MP/LJ range', () => {
@@ -155,7 +154,7 @@
     assert.strictEqual(sit.playersAfter, 5);
     const fb = ev(s, 'raise');
     assert.strictEqual(fb.verdict, 'correct');
-    assert.strictEqual(fb.lines[0], 'Ты на позиции LJ за столом на 6. После тебя ещё 5 игроков.');
+    assert.strictEqual(fb.more[0], 'Ты на позиции LJ за столом на 6. После тебя ещё 5 игроков.');
     assert.strictEqual(verdict(at(6, 'LJ', '4c 4d'), 'raise'), 'acceptable');
     assert.strictEqual(verdict(at(6, 'LJ', 'Kc Td'), 'raise'), 'mistake');
     assert.strictEqual(verdict(at(6, 'BTN', 'Kc 9d'), 'raise'), 'correct');
@@ -177,7 +176,7 @@
     assert.strictEqual(verdict(bb, 'raise'), 'mistake');
     const fold = ev(bb, 'fold');
     assert.strictEqual(fold.verdict, 'mistake');
-    assert.ok(fold.lines.includes('Никогда не сбрасывай, когда можно бесплатно чекнуть.'));
+    assert.ok(all(fold).includes('Никогда не сбрасывай, когда можно бесплатно чекнуть.'));
     assert.strictEqual(fold.title, '❌ Префлоп: ты сыграл «сброс», правильно — чекнуть.');
     const a9 = at(2, 'BB', 'Ac 9d', ['call']);
     assert.strictEqual(verdict(a9, 'raise'), 'correct');
@@ -195,12 +194,12 @@
     assert.strictEqual(verdict(at(9, 'CO', '2h 2c', ['call', 'call']), 'call'), 'acceptable');
     const junk = ev(at(9, 'BTN', 'Kh 2c', ['call']), 'call');
     assert.strictEqual(junk.verdict, 'mistake');
-    assert.ok(junk.lines.includes('Доплачивать с такой рукой — лишние потери: она слабая и без потенциала.'));
+    assert.ok(all(junk).includes('Доплачивать с такой рукой — лишние потери: она слабая и без потенциала.'));
     const mp = at(9, 'MP', '9h 8h', ['call']);
     assert.strictEqual(verdict(mp, 'fold'), 'correct');
     assert.strictEqual(verdict(mp, 'call'), 'mistake');  // speculative, but not in late position
     assert.strictEqual(verdict(at(9, 'HJ', 'Ac Kd', ['call']), 'call'), 'mistake');
-    assert.ok(ev(at(9, 'CO', 'Ac Kd', ['call', 'call']), 'raise').lines.some((l) => l.startsWith('Перед тобой 2 лимпера')));
+    assert.ok(all(ev(at(9, 'CO', 'Ac Kd', ['call', 'call']), 'raise')).some((l) => l.startsWith('Перед тобой 2 лимпера')));
   });
 
   test('ranges: vs a raise — 3-bet, set mining by stack, connectors only on BTN/CO, borders', () => {
@@ -214,18 +213,18 @@
     assert.strictEqual(ev(qq, 'raise').title, '✅ Префлоп: 3-бет — верно.');
     assert.strictEqual(verdict(qq, 'call'), 'acceptable');
     assert.strictEqual(verdict(qq, 'fold'), 'mistake');
-    assert.ok(ev(qq, 'call').lines.includes(`${qq.table.players[qq.hand.order[0]].name} (UTG) повышает до 60.`));
+    assert.ok(all(ev(qq, 'call')).includes(`${qq.table.players[qq.hand.order[0]].name} (UTG) повышает до 60.`));
     // set mining: 2000 / 60 = 33 raises → call; 1000 / 60 = 16 → fold
     const deep = vs('BTN', '5h 5d');
     assert.strictEqual(Ranges.situation(deep.hand, 0).effStack, 2000);
     assert.strictEqual(verdict(deep, 'call'), 'correct');
-    assert.ok(ev(deep, 'call').lines.includes('Игра на сет: нужно ≥ 20 рейзов соперника в стеке, у тебя 33 — хватает, колл.'));
+    assert.ok(all(ev(deep, 'call')).includes('Игра на сет: нужно ≥ 20 рейзов соперника в стеке, у тебя 33 — хватает, колл.'));
     const shallow = vs('BTN', '5h 5d', { stacks: { 0: 1000 } });
     assert.strictEqual(Ranges.situation(shallow.hand, 0).effStack, 1000);
     const sh = ev(shallow, 'call');
     assert.strictEqual(sh.verdict, 'mistake');
     assert.strictEqual(sh.title, '❌ Префлоп: ты сыграл «колл», правильно — сбросить.');
-    assert.ok(sh.lines.includes('Игра на сет: нужно ≥ 20 рейзов соперника в стеке, у тебя 16 — мало, сброс.'));
+    assert.ok(all(sh).includes('Игра на сет: нужно ≥ 20 рейзов соперника в стеке, у тебя 16 — мало, сброс.'));
     assert.strictEqual(verdict(shallow, 'fold'), 'correct');
     assert.strictEqual(verdict(vs('CO', '9h 9d', { stacks: { 0: 600 } }), 'call'), 'correct'); // 77+ do not need the stack rule
     assert.strictEqual(verdict(vs('BTN', 'Jh Jd'), 'raise'), 'acceptable');
@@ -243,7 +242,7 @@
     assert.strictEqual(verdict(vs('HJ', 'Ah Qd'), 'call'), 'acceptable');
     const junk = ev(vs('BB', '7h 2d'), 'call');
     assert.strictEqual(junk.verdict, 'mistake');
-    assert.ok(junk.lines[0].endsWith('После тебя никого нет — ты ходишь последним.'));
+    assert.ok(junk.more[0].endsWith('После тебя никого нет — ты ходишь последним.'));
   });
 
   test('ranges: vs a 3-bet — only QQ+ and AK continue', () => {
@@ -311,7 +310,7 @@
     assert.deepStrictEqual([sit.kind, sit.canRaise, sit.toCall], ['vs3bet', false, 20]);
     const fb = Ranges.evaluate(hand, 0, { type: 'call' }, table);
     assert.strictEqual(fb.verdict, 'correct');
-    assert.ok(fb.lines.some((l) => l.includes('доплатить нужно всего 20') && l.includes('12%')), fb.lines.join(' | '));
+    assert.ok(all(fb).some((l) => l.includes('доплатить нужно всего 20') && l.includes('12%')), fb.lines.join(' | '));
     assert.strictEqual(Ranges.evaluate(hand, 0, { type: 'fold' }, table).verdict, 'mistake');
     // big blind, a 30-chip UTG shove: 10 more into 60 even with 7-2
     const bb = at(9, 'BB', '7h 2d', ['raise:30'], { stacks: { 1: 30 } });
@@ -322,7 +321,7 @@
     // the hero's own call is all-in for 5 more into 95
     const tiny = at(9, 'BB', '7h 2d', ['raise:60'], { stacks: { 0: 25 } });
     assert.strictEqual(verdict(tiny, 'call'), 'correct');
-    assert.ok(ev(tiny, 'call').lines.some((l) => l.startsWith('Твой колл — это олл-ин, и доплатить нужно всего 5 при банке 90')));
+    assert.ok(all(ev(tiny, 'call')).some((l) => l.startsWith('Твой колл — это олл-ин, и доплатить нужно всего 5 при банке 90')));
     // 15 chips under the gun: no raise is possible, so a range hand just goes in with a call
     const short = at(9, 'UTG', 'Ah Ad', [], { stacks: { 0: 15 } });
     assert.strictEqual(Ranges.situation(short.hand, 0).canRaise, false);
@@ -331,28 +330,93 @@
 
   test('audit: the hint mentions the price of a cheap all-in', () => {
     const bb = at(9, 'BB', '7h 2d', ['raise:30'], { stacks: { 1: 30 } });
-    assert.ok(Ranges.hint(bb.hand, 0, bb.table).lines.some((l) => l.includes('доплатить нужно всего 10 при банке 60')));
+    assert.ok(all(Ranges.hint(bb.hand, 0, bb.table)).some((l) => l.includes('доплатить нужно всего 10 при банке 60')));
     const normal = at(9, 'BB', '7h 2d', ['raise:60']);
-    assert.ok(!Ranges.hint(normal.hand, 0, normal.table).lines.some((l) => l.includes('доплатить нужно всего')));
+    assert.ok(!all(Ranges.hint(normal.hand, 0, normal.table)).some((l) => l.includes('доплатить нужно всего')));
   });
 
   test('audit: over-limp text fits the small blind too', () => {
     const fb = ev(at(9, 'SB', '9h 8h', ['call']), 'call');
     assert.strictEqual(fb.verdict, 'acceptable');
-    assert.ok(fb.lines.includes('Доплатить (оверлимп) допустимо: пары, одномастные коннекторы и одномастные тузы в поздней позиции и на малом блайнде дёшево смотрят флоп.'), fb.lines.join(' | '));
+    assert.ok(all(fb).includes('Доплатить (оверлимп) допустимо: пары, одномастные коннекторы и одномастные тузы в поздней позиции и на малом блайнде дёшево смотрят флоп.'), fb.lines.join(' | '));
   });
 
   test('ranges: hint explains position, situation and range without a verdict', () => {
     const h = Ranges.hint(at(9, 'UTG', 'Kd Jc').hand, 0);
     assert.strictEqual(h.title, '💡 Подсказка: UTG — ранняя позиция');
-    assert.ok(h.lines.some((l) => l.includes('77+, AJs+, AQo+, KQs')));
-    assert.ok(h.lines.some((l) => l.includes('(K-J разномастные)')));
+    assert.deepStrictEqual(h.grid, { key: 'UTG', hl: 'KJo' });
+    assert.ok(!all(h).some((l) => /[2-9TJQKA]{2}[so]?\+,/.test(l)), 'no range lists');
+    assert.ok(all(h).some((l) => l.includes('(K-J разномастные)')));
     assert.ok(!h.lines.join(' ').includes('Правильно'));
     const s = at(9, 'BTN', '5h 5d', ['raise:60'], { stacks: { 0: 1000 } });
     const v = Ranges.hint(s.hand, 0, s.table);
     assert.strictEqual(v.title, '💡 Подсказка: BTN — поздняя позиция');
-    assert.ok(v.lines.some((l) => l.includes(`${s.table.players[s.hand.order[0]].name} (UTG) повышает до 60`)));
-    assert.ok(v.lines.some((l) => l.includes('(у тебя 16)')));
+    assert.ok(all(v).some((l) => l.includes(`${s.table.players[s.hand.order[0]].name} (UTG) повышает до 60`)));
+    assert.ok(all(v).some((l) => l.includes('(у тебя 16)')));
     assert.strictEqual(Ranges.hint(at(2, 'BB', '7c 2d', ['call']).hand, 0).title, '💡 Подсказка: BB — блайнд');
   });
+
+  // ---------- round 3: grids instead of range lists, short texts, pot-odds question, teacher ----------
+  const RANGE_LIST = /[2-9TJQKA]{2}[so]?\+,/;
+  test('round 3: preflop feedback and hints are short, carry a grid and never a range list', () => {
+    U.seed(31);
+    const deck = Cards.deck();
+    let n = 0;
+    for (let k = 0; k < 120; k++) {
+      const size = 2 + (k % 8), pos = U.pick(Engine.positionNames(size));
+      const d = U.shuffle(deck.slice()), hole = Cards.strList(d.slice(0, 2));
+      const script = k % 4 === 1 ? ['raise:60'] : k % 4 === 2 ? ['call'] : [];
+      let s;
+      try { s = at(size, pos, hole, script); } catch (e) { continue; }       // the script seat may be the hero
+      n++;
+      for (const t of ['fold', 'check', 'call', 'raise']) {
+        const fb = ev(s, t);
+        assert.ok(fb.lines.length <= 2 && fb.lines.every((l) => l.length <= 110), `${pos} ${hole} ${t}: ${fb.lines.join(' / ')}`);
+        assert.ok(fb.grid && fb.grid.key && fb.grid.hl === fb.code, JSON.stringify(fb.grid));
+        assert.strictEqual(Ranges.grid(fb.grid.key).length, 13);
+        for (const l of [fb.title, ...all(fb)]) assert.ok(!RANGE_LIST.test(l), l);
+      }
+      const h = Ranges.hint(s.hand, 0, s.table);
+      for (const l of all(h)) assert.ok(!RANGE_LIST.test(l), l);
+      const a = Ranges.advise(s.hand, 0, s.table);
+      assert.ok(a.title.startsWith('👨‍🏫 Лучше: ') && a.lines.length <= 3, a.title);
+      assert.strictEqual(ev(s, a.best).verdict, 'correct', `${pos} ${hole}: teacher says ${a.best}`);
+      if (a.best === 'raise') assert.ok(a.size > s.hand.bb && a.title.endsWith(U.fmt(a.size)), a.title);
+    }
+    assert.ok(n > 60, 'spots ' + n);
+    U.seed(null);
+  });
+
+  test('round 3: grid keys follow the situation; limped and stack-aware vs-raise grids', () => {
+    assert.strictEqual(ev(at(9, 'BTN', '5h 5d', ['raise:60']), 'call').grid.key, 'vsRaise:BTN:deep');
+    assert.strictEqual(ev(at(9, 'BTN', '5h 5d', ['raise:60'], { stacks: { 0: 1000 } }), 'call').grid.key, 'vsRaise:BTN:short');
+    assert.strictEqual(ev(at(9, 'BTN', '7h 6h', ['call']), 'call').grid.key, 'limped:BTN');
+    assert.strictEqual(ev(at(2, 'BB', '7c 2d', ['call']), 'check').grid.key, 'BB');
+    const cell = (key, code) => Ranges.grid(key).flat().find((c) => c.code === code).cls;
+    assert.deepStrictEqual(['33', '87s', 'AA', '72o'].map((c) => cell('vsRaise:BTN:deep', c)), ['call', 'call', 'raise', 'out']);
+    assert.strictEqual(cell('vsRaise:BTN:short', '33'), 'out');
+    assert.deepStrictEqual(['AKo', '76s', 'K2o'].map((c) => cell('limped:BTN', c)), ['raise', 'raise', 'out']);
+    assert.strictEqual(cell('limped:CO', '54s'), 'call');                     // over-limp is acceptable late
+    assert.deepStrictEqual(Ranges.mySituation(at(9, 'BTN', '5h 5d', ['raise:60']).hand, 0), { key: 'vsRaise:BTN:deep', caption: 'BTN: против рейза', hl: '55' });
+  });
+
+  test('round 3: preflop pot-odds question when facing a raise; teacher sizes', () => {
+    const s = at(9, 'BTN', '9h 8h', ['raise:60']);                              // pot 90 (blinds 30 + 60), call 60
+    const [q] = Ranges.questions(s.hand, 0, s.table, {});
+    assert.deepStrictEqual([q.id, q.type, q.unit, q.info], ['potodds', 'number', '%', { pot: 90, bet: 60, toCall: 60 }]);
+    assert.deepStrictEqual(Ranges.questions(s.hand, 0, s.table, { questions: { potodds: false } }), []);
+    assert.deepStrictEqual(Ranges.questions(at(9, 'UTG', 'Ah Ad').hand, 0, null, {}), []); // nothing to call
+    const ok = Ranges.check(s.hand, 0, 'potodds', 40);
+    assert.strictEqual(ok.title, '✅ Шансы банка: 40% — верно.');
+    assert.deepStrictEqual(ok.lines, ['Банк 90 (блайнды и ставки). Твой колл 60. 60 ÷ (90 + 60) = 40%.', 'Быстро: 60 ÷ 150 ≈ 2/5 → 40%.']);
+    assert.ok(!Ranges.check(s.hand, 0, 'potodds', 25).ok);
+    assert.ok(Coach.check(q.spot, 'potodds', 41).ok);
+    const open = Ranges.advise(at(9, 'UTG', 'Ah Ad').hand, 0);
+    assert.deepStrictEqual([open.best, open.size, open.title], ['raise', 60, '👨‍🏫 Лучше: рейз до 60']);
+    const three = Ranges.advise(at(9, 'BTN', 'Ah Ad', ['raise:60']).hand, 0);
+    assert.deepStrictEqual([three.best, three.size, three.title], ['raise', 180, '👨‍🏫 Лучше: 3-бет до 180']);
+    const fold = Ranges.advise(at(9, 'UTG', '7h 2d').hand, 0);
+    assert.deepStrictEqual([fold.best, fold.lines[1]], ['fold', 'Сброс ничего не стоит.']);
+  });
+
 })();

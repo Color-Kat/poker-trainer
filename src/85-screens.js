@@ -4,14 +4,6 @@
 const Screens = (() => {
   const POSITIONS = ['UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'];
   const GROUP = { UTG: 'Ранняя', 'UTG+1': 'Ранняя', MP: 'Средняя', LJ: 'Средняя', HJ: 'Средняя', CO: 'Поздняя', BTN: 'Поздняя', SB: 'Блайнд', BB: 'Блайнд' };
-  // ТЗ 6.1 open ranges — fallback when Ranges is missing.
-  const R_EP = '77+, AJs+, AQo+, KQs', R_MP = '55+, ATs+, AJo+, KJs+, QJs, JTs, KQo';
-  const R_CO = '22+, A2s+, A9o+, K9s+, Q9s+, J9s+, T9s, 98s, 87s, KTo+, QTo+, JTo';
-  const OPEN = {
-    UTG: R_EP, 'UTG+1': R_EP, MP: R_MP, LJ: R_MP, HJ: '22+, A9s+, ATo+, KTs+, QTs+, JTs, T9s, KJo+', CO: R_CO,
-    BTN: '22+, A2s+, A7o+, K7s+, Q8s+, J8s+, T8s+, 97s+, 86s+, 76s, 65s, K9o+, Q9o+, J9o+, T9o', SB: R_CO, BB: R_CO,
-  };
-  const POS_NOTE = { SB: 'Как у CO.', BB: 'Если все сбросили до SB, а он только уравнял (лимп), можно чек или рейз с диапазоном CO.' };
   // ТЗ §8 (name, type, VPIP, PFR, postflop aggression, fold to a bet, bluff, tells) + how to play against.
   // Fallback for Bots.STYLES fields (same keys as STYLE_KEYS).
   const STYLE_KEYS = ['name', 'type', 'vpip', 'pfr', 'postflop', 'foldToBet', 'bluff', 'tells', 'desc'];
@@ -38,16 +30,16 @@ const Screens = (() => {
   ];
   const ODDS = [['1/3 банка', 20], ['1/2 банка', 25], ['2/3 банка', 28], ['Банк', 33], ['2 банка', 40]];
   const MODES = [
-    { id: 'learn', name: 'Обучение', suit: '♥', cta: 'Начать обучение', desc: 'Вопросы на каждом ключевом решении и подробные разборы. Можно взять паузу и прочитать подсказку.' },
-    { id: 'practice', name: 'Тренировка', suit: '♦', cta: 'Начать тренировку', desc: 'Вопросы появляются выборочно, объяснение — только если ошибёшься.' },
-    { id: 'tournament', name: 'Турнир', suit: '♠', cta: 'Начать турнир', desc: 'Без подсказок по ходу игры. Блайнды растут, проигравший все фишки вылетает.' },
+    { id: 'learn', name: 'Обучение', suit: '♥', cta: 'Начать обучение', desc: 'Вопросы на каждом решении, учитель и разборы.' },
+    { id: 'practice', name: 'Тренировка', suit: '♦', cta: 'Начать тренировку', desc: 'Вопросы выборочно, объяснение — только при ошибке.' },
+    { id: 'tournament', name: 'Турнир', suit: '♠', cta: 'Начать турнир', desc: 'Без подсказок. Блайнды растут, без фишек — вылет.' },
   ];
   const MODE_RU = { learn: 'Обучение', practice: 'Тренировка', tournament: 'Турнир' };
   const HOW = [
-    'Начни с обучения: там вопрос на каждом решении и разбор с цифрами.',
-    'Перед действием отвечай на вопросы — ауты, эквити, шансы банка. Потом решай: сброс, колл или рейз.',
-    'Когда открывается флоп, тёрн или ривер, выбери, куда смотреть. Соперники в этот момент выдают силу руки.',
-    'Шпаргалка с таблицами открывается в любой момент — и здесь, и за столом.',
+    'Начни с обучения: вопрос на каждом решении и разбор с цифрами.',
+    'Сначала ответь на вопросы, потом выбери действие.',
+    'Когда открывается карта, смотри на соперников — они выдают силу руки.',
+    'Шпаргалка и диапазоны открываются в любой момент.',
   ];
   const QUESTIONS = [
     ['preflop', 'Префлоп', 'Входить ли в раздачу с этой рукой на этой позиции'],
@@ -58,9 +50,11 @@ const Screens = (() => {
     ['tells', 'Теллы', 'Смотреть на борд или на соперников, когда открывается карта'],
   ];
   const STYLE_COLS = ['VPIP', 'Рейз префлоп', 'Агрессия после флопа', 'Сброс на ставку', 'Блеф', 'Теллы'];
-  const TABS = [['outs', 'Ауты'], ['rule', 'Правило 2 и 4'], ['odds', 'Шансы банка'], ['pos', 'Позиции'], ['types', 'Соперники']];
-  const TAB_FOR = { preflop: 'pos', outs: 'outs', equity: 'rule', potodds: 'odds', action: 'odds', read: 'types' };
-  const LEGEND = { raise: 'Рейз / 3-бет', in: 'Входит в диапазон', call: 'Колл', border: 'На границе: допустимо', out: 'Сброс' };
+  const TABS = [['outs', 'Ауты'], ['rule', 'Правило 2 и 4'], ['odds', 'Шансы банка'], ['pos', 'Позиции и диапазоны'], ['types', 'Соперники'], ['tells', 'Теллы']];
+  const TAB_FOR = { preflop: 'pos', outs: 'outs', equity: 'rule', potodds: 'odds', action: 'odds', read: 'types', tells: 'tells' };
+  // How far to trust tells, by style (SPEC §8); the per-reaction rows come from Coach.TELLS_GUIDE.
+  const TELL_TRUST = [['Камень', 'честные, но слабые — верь'], ['Станция', 'честные и явные — верь'], ['Регуляр', 'почти нет; иногда актёрство'],
+    ['Маньяк', 'хаотичные — не верь'], ['Актёр', 'наоборот: слабость = сила']];
 
   // Optional cross-module data: undefined instead of a throw when a module is missing or broken.
   const opt = (f) => { try { return f(); } catch (e) { return undefined; } };
@@ -70,7 +64,6 @@ const Screens = (() => {
   const date = (ts) => new Date(ts).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const style = (id) => STYLE_KEYS.map((k, i) => { const v = opt(() => Bots.STYLES[id][k]); return typeof v === 'string' && v ? v : STYLE_ROWS[id][i]; });
   const group = (p) => opt(() => Ranges.POS_INFO[p].group) || GROUP[p];
-  const openText = (p) => opt(() => Ranges.OPEN_TEXT[p]) || OPEN[p];
   const rule4 = (o) => o * 4 - Math.max(0, o - 8);
   const isRed = (s) => s === '♥' || s === '♦';
   // Russian typography: one-letter words stick to the next word, a dash to the previous one.
@@ -140,6 +133,7 @@ const Screens = (() => {
   const FREQS = [25, 50, 75, 100].map((f) => [f, f + '%']);
   const REVIEWS = [['hand', 'После каждой раздачи'], ['end', 'В конце турнира']];
   const BOT_MODES = [['random', 'Случайный состав'], ['manual', 'Выбрать вручную']];
+  const ASSIST = [['off', 'Выкл'], ['normal', 'Обычно'], ['strong', 'Сильно']];
   const NUMERIC = ['players', 'startBB', 'levelHands', 'practiceFreq'];
   const RANGE_OUT = {
     startBB: (v) => `${v} BB <small>${U.fmt(v * 20)} фишек</small>`,
@@ -157,6 +151,12 @@ const Screens = (() => {
       <select name="bot" data-i="${i}">${Settings.STYLE_IDS.map((x) => `<option value="${x}"${x === id ? ' selected' : ''}>${esc(style(x)[0])}</option>`).join('')}</select></label>`).join('')}</div>
       <p class="sc-hint">Чем отличаются стили — <button class="sc-link" data-act="types">в шпаргалке</button>.</p>`;
   }
+
+  const switchRow = (name, on, title, hint) => `<label class="sc-switch"><span><b>${title}</b><small>${hint}</small></span><input type="checkbox" name="${name}"${on ? ' checked' : ''}></label>`;
+  const heroPosHTML = (s) => {
+    const names = opt(() => Engine.positionNames(s.players)) || POSITIONS;
+    return `<select name="heroPos" aria-label="Моя позиция">${['any', ...names].map((p) => `<option value="${p}"${p === s.heroPos ? ' selected' : ''}>${p === 'any' ? 'Любая (по кругу)' : p}</option>`).join('')}</select>`;
+  };
 
   function settings(opts = {}) {
     const s = Settings.get(), L = Settings.LIMITS;
@@ -178,6 +178,12 @@ const Screens = (() => {
           </section>
         </div>
         <div>
+          <section class="panel sc-sec"><h2>Обучение</h2>
+            ${switchRow('teacher', s.teacher, 'Учитель: подсказывать лучший ход', 'Перед каждым ходом — какое действие лучше и почему.')}
+            ${switchRow('autoSkipFolded', s.autoSkipFolded, 'Сразу пропускать раздачу, когда я сбросил', 'Не ждать ходов соперников.')}
+            ${field('Подкрутка раздач', seg('dealAssist', s.dealAssist, ASSIST, 'Подкрутка раздач'), '', 'Чаще интересные руки вместо мусора. Только обучение и тренировка.')}
+            ${field('Моя позиция', `<div data-heropos>${heroPosHTML(s)}</div>`, '', 'Закрепи позицию, чтобы отработать её. Не в турнире.')}
+          </section>
           <section class="panel sc-sec"><h2>Соперники</h2>
             ${seg('botsMode', s.botsMode, BOT_MODES, 'Состав соперников')}
             <div data-bots>${botsHTML(s)}</div>
@@ -201,9 +207,15 @@ const Screens = (() => {
     root.addEventListener('change', (e) => {
       const t = e.target;
       if (t.name === 'q') Settings.set({ questions: { [t.value]: t.checked } });
+      else if (t.type === 'checkbox') Settings.set({ [t.name]: t.checked });
       else if (t.name === 'bot') { const b = Settings.get().botStyles; b[+t.dataset.i] = t.value; Settings.set({ botStyles: b }); }
       else if (t.name) Settings.set({ [t.name]: NUMERIC.includes(t.name) ? +t.value : t.value });
       if (t.name === 'players' || t.name === 'botsMode') root.querySelector('[data-bots]').innerHTML = typo(botsHTML(Settings.get()));
+      if (t.name === 'players') {
+        const cur = Settings.get(), names = opt(() => Engine.positionNames(cur.players)) || POSITIONS;
+        if (!names.includes(cur.heroPos)) Settings.set({ heroPos: 'any' });
+        root.querySelector('[data-heropos]').innerHTML = heroPosHTML(Settings.get());
+      }
     });
   }
 
@@ -213,7 +225,7 @@ const Screens = (() => {
     if (!cats.length) return '<p class="sc-empty">Оценённых решений не было.</p>';
     return `<div class="sc-bars">${cats.map((cat) => {
       const c = byCat[cat] || { ok: 0, n: 0 }, p = pct(c);
-      return `<div class="sc-bar"><div class="sc-bar-top"><span>${cat === 'tells' ? 'Теллы: смотрел на соперников' : Stats.CAT_RU[cat]}
+      return `<div class="sc-bar"><div class="sc-bar-top"><span>${Stats.CAT_RU[cat]}
         <small>${c.n ? `${c.ok} из ${c.n}` : 'нет ответов'}</small></span>${p === null ? '<b class="sc-dim">—</b>' : `<b>${p}%</b>`}</div>
         <div class="sc-track"><i style="width:${p || 0}%"></i></div></div>`;
     }).join('')}</div>`;
@@ -334,7 +346,14 @@ const Screens = (() => {
     outs: () => `<p>Аут — карта, которая улучшит твою руку до, скорее всего, лучшей. Шанс поймать аут:</p>
       ${table(['Дро', 'Ауты', 'Одна карта', 'Две карты'], DRAWS.map(([name, o, p1, p2, ex]) => [`${name}<small>${txt(ex.split(' на ').map((g) => g.replace(/ /g, '\u00a0')).join(' на '))}</small>`, o, p1 + '%', p2 + '%']))}
       <p class="sc-note"><b>Как считать.</b> Флеш-дро: в масти 13 карт, 4 ты видишь, осталось 9 аутов. Открытое стрит-дро: по 4 карты с каждой стороны, итого 8.</p>
-      <p class="sc-note"><b>Грязные ауты</b> улучшают и тебя, и соперника: спаривают борд, когда у него возможен фулл-хаус, или дают тебе не старший флеш. Когда в банке трое и больше, считай только чистые ауты.</p>`,
+      <h3>Грязные ауты</h3>
+      <p class="sc-note">Аут улучшает тебя, но может дать сопернику руку лучше. Считай так: все ауты − грязные = чистые.</p>
+      <ul class="sc-rules">
+        <li><b>Спаривает борд:</b> A♥ K♥ на 9♥ 5♥ 2♣ — 2♥ даёт тебе флеш, а сопернику с сетом фулл-хаус. Чистых 8 из 9.</li>
+        <li><b>Три карты масти:</b> 8♠ 7♠ на 6♦ 5♦ K♣ — 4♦ и 9♦ дают стрит, но и чужой флеш. Чистых 6 из 8.</li>
+        <li><b>Не натсовый флеш:</b> у тебя одна карта масти, и она мелкая — флеш соберёшь, а у соперника может быть старше.</li>
+      </ul>
+      <p class="sc-note"><b>Правило:</b> один на один считай все ауты; в банке 3+ игроков — только чистые.</p>`,
     rule: () => `<div class="sc-formula">
         <p><b>Одна карта</b> — ставка не олл-ин, ты увидишь только следующую карту:</p><p class="sc-eq">эквити ≈ ауты × 2</p>
         <p><b>Две карты</b> — олл-ин на флопе, ты увидишь и тёрн, и ривер:</p><p class="sc-eq">эквити ≈ ауты × 4</p>
@@ -348,20 +367,8 @@ const Screens = (() => {
       <p class="sc-note"><b>Пример.</b> В банке 100, соперник ставит 100. Банк со ставкой — 200, тебе доплатить 100: 100 ÷ (200 + 100) = 33%.</p>
       <p class="sc-note"><b>Как решать.</b> Эквити не меньше нужного — колл. Меньше — сброс. С сильным дро (8+ аутов) против соперника, который умеет сбрасывать, рейз-полублеф может быть лучше. С 12+ аутами рейз почти всегда лучше, кроме игры против коллинг-станции.</p>
       <p class="sc-note"><b>Вместе с правилом 2 и 4.</b> Флеш-дро на тёрне (9 аутов), соперник ставит банк: эквити 9 × 2 = 18%, нужно 33%, значит сброс.</p>`,
-    pos: () => `<p class="sc-note">Первый рейз, когда до тебя все сбросили. Нажми на позицию, чтобы увидеть сетку рук.</p>
-      ${table(['Позиция', 'Группа', 'Открывай рейзом (стол на 9)'], POSITIONS.map((p) => [
-        `<button class="sc-link sc-pos-btn" data-act="range" data-arg="${p}" data-title="Диапазон открытия: ${p}">${p}</button><small class="sc-m">${esc(group(p))}</small>`,
-        esc(group(p)), esc(openText(p)) + (POS_NOTE[p] ? `<small>${POS_NOTE[p]}</small>` : '')]), 9, 'sc-wide sc-open')}
-      <p class="sc-note">«77+» — 77 и все пары старше, «AJs+» — AJs, AQs, AKs. s — одномастные, o — разномастные. За столом меньше 9 человек ранние позиции убираются: за 6 первым ходит LJ, играй его диапазон.</p>
-      <h3>Против рейза</h3>
-      <ul class="sc-rules">
-        <li><b>3-бет (ререйз):</b> QQ+, AK.</li>
-        <li><b>Колл:</b> JJ–22, AQs, AJs, KQs; одномастные коннекторы 76s+ — только на BTN и CO. Маленькие пары — только если твой стек не меньше 20 рейзов соперника: это игра на сет.</li>
-        <li><b>Остальное:</b> сброс.</li>
-        <li><b>Против рейза и ререйза:</b> только QQ+ и AK, остальное — сброс.</li>
-      </ul>
-      <p><button class="btn btn-sm" data-act="range" data-arg="vsRaise" data-title="Против рейза">Сетка против рейза</button>
-        <button class="btn btn-sm" data-act="range" data-arg="vs3bet" data-title="Против рейза и ререйза">Сетка против 3-бета</button></p>`,
+    pos: () => `<p class="sc-note">Выбери ситуацию и позицию. Твоя рука в игре подсвечивается белой рамкой.</p><div class="rb" data-rb></div>
+      <p class="sc-note">Над диагональю — одномастные (s), под ней — разномастные (o), на диагонали — пары. За столом меньше 9 ранние позиции убираются.</p>`,
     types: () => `${table(['Стиль', ...STYLE_COLS],
         Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return [`<b>${r[0]}</b><small>${r[1]}</small>`, ...r.slice(2, 8)]; }), 9, 'sc-wide sc-d')}
       <div class="sc-m sc-cards">${Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return `<div class="sc-card"><b>${r[0]}</b> <small>${r[1]}</small>
@@ -369,6 +376,14 @@ const Screens = (() => {
       <p class="sc-note">VPIP — как часто игрок добровольно вкладывает фишки до флопа. Стиль соперника подписывается после 20 раздач с ним.</p>
       <h3>Как играть против</h3>
       <dl class="sc-vs">${Object.keys(STYLE_ROWS).map((id) => { const r = style(id).map(esc); return `<dt>${r[0]}</dt><dd>${r[8]}</dd>`; }).join('')}</dl>`,
+    tells: () => {
+      const guide = opt(() => Coach.TELLS_GUIDE) || [];
+      return `<p class="sc-note">Когда открывается карта, смотри на соперников: реакция часто выдаёт, попал ли он.</p>
+      ${guide.length ? table(['Реакция', 'Что значит', 'Насколько верить'], guide.map((g) => [`<b>${esc(g.sign || g.anim)}</b>`, esc(g.meaning || ''), esc(g.reliability || '')]), 9, 'sc-wide') : ''}
+      <h3>Кому верить</h3>
+      <dl class="sc-vs">${TELL_TRUST.map(([n, t]) => `<dt>${n}</dt><dd>${t}</dd>`).join('')}</dl>
+      <p class="sc-note">Около 15% реакций — случайный шум. <b>Как проверить себя:</b> отвечай на вопрос «Что значит…» — после раздачи тренер покажет, что было у соперника.</p>`;
+    },
   };
 
   function cheatSheet(tab) {
@@ -382,6 +397,7 @@ const Screens = (() => {
       wide: true,
       onOpen: (root) => {
         reveal(root);
+        rangeBrowser(root.querySelector('[data-rb]'), { tab: 'open', pos: 'UTG', n: 9 });
         onAct(root, {
           tab: (id) => {
             root.querySelectorAll('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== id; });
@@ -389,25 +405,42 @@ const Screens = (() => {
             root.closest('.modal').scrollTop = 0;
             reveal(root);
           },
-          range: (key, el) => rangeModal(key, el.dataset.title),
         });
       },
     });
   }
 
-  // ---------- range grid ----------
-  function rangeModal(key, title) {
-    const grid = opt(() => Ranges.grid(key));
-    let cells = Array.isArray(grid) ? grid.flat() : null;
-    if (!cells && OPEN[key]) { const set = Cards.parseRange(OPEN[key]); cells = Cards.HAND_CODES.map((code) => ({ code, cls: set.has(code) ? 'in' : 'out' })); }
-    const text = POSITIONS.includes(key) ? openText(key) : '';
-    const used = cells ? Object.keys(LEGEND).filter((k) => cells.some((c) => c.cls === k)) : [];
-    const body = cells ? `<div class="sc-grid" role="img" aria-label="${esc(title || key)}${text ? ': ' + esc(text) : ''}">${cells.map((c) => `<span class="sc-cell sc-c-${esc(c.cls)}">${esc(c.code)}</span>`).join('')}</div>
-      <div class="sc-legend">${used.map((k) => `<span><i class="sc-c-${k}"></i>${LEGEND[k]}</span>`).join('')}</div>
-      ${text ? `<p class="sc-note sc-center">${esc(text)}${POS_NOTE[key] ? '<br>' + POS_NOTE[key] : ''}</p>` : ''}
-      <p class="sc-note sc-center">Над диагональю — одномастные руки (s), под ней — разномастные (o), на диагонали — пары.</p>`
-      : '<p class="sc-empty">Сетка для этого диапазона пока недоступна.</p>';
-    return modal(title || 'Диапазон', body);
+  // ---------- range grids: a tab per preflop situation × a chip per position ----------
+  const RB_TABS = [['sit', 'Твоя ситуация'], ['open', 'Открытие'], ['limp', 'Против лимпа'], ['vsRaise', 'Против рейза'], ['vs3bet', 'Против 3-бета']];
+  const RB_NOTE = {
+    open: 'До тебя все сбросили — открывай рейзом.',
+    limp: 'Перед тобой лимперы (или ты BB после лимпа) — рейз.',
+    vsRaise: 'До тебя повысили. Мелкие пары — только при стеке ≥ 20 рейзов.',
+    vs3bet: 'Был рейз и ререйз (3-бет).',
+  };
+  const rbKey = (st) => (st.tab === 'sit' ? st.sit.key : st.tab === 'open' ? st.pos : `${st.tab === 'limp' ? 'limped' : st.tab}:${st.pos}`);
+  // st = { tab, pos, n, hl, sit: { key, caption, hl, ctx? } | null } — redrawn in place on every click.
+  function rangeBrowser(box, st) {
+    if (!box) return;
+    const names = opt(() => Engine.positionNames(st.n)) || POSITIONS;
+    if (!names.includes(st.pos)) st.pos = names[0];
+    const draw = () => {
+      const tabs = RB_TABS.filter(([id]) => id !== 'sit' || st.sit);
+      const head = st.tab === 'sit' ? `<p class="rb-cap"><b>${txt(st.sit.caption || '')}</b></p>`
+        : `<div class="rb-pos">${names.map((p) => `<button class="rb-chip" data-act="rbpos" data-arg="${p}" aria-pressed="${p === st.pos}">${p}</button>`).join('')}</div><p class="rb-cap">${RB_NOTE[st.tab]}</p>`;
+      box.innerHTML = `<div class="rb-tabs" role="tablist">${tabs.map(([id, l]) => `<button class="rb-tab" role="tab" data-act="rbtab" data-arg="${id}" aria-selected="${id === st.tab}">${l}</button>`).join('')}</div>
+        ${head}${View.rangeGridHTML(rbKey(st), st.hl || (st.sit && st.sit.hl), st.tab === 'sit' ? st.sit.ctx : undefined) || '<p class="sc-empty">Сетка недоступна.</p>'}`;
+    };
+    onAct(box, { rbtab: (id) => { st.tab = id; draw(); }, rbpos: (p) => { st.pos = p; draw(); } });
+    draw();
+  }
+  // rangeModal({ situation, pos, n, hl }) — tabs «Твоя ситуация» (when given) + the standard ones.
+  // Old form rangeModal(key, title): one grid.
+  function rangeModal(a, title) {
+    if (typeof a === 'string') return modal(title || 'Диапазон', View.rangeGridHTML(a) || '<p class="sc-empty">Сетка недоступна.</p>');
+    const o = a || {};
+    const st = { tab: o.situation ? 'sit' : 'open', pos: o.pos || 'BTN', n: o.n || 9, hl: o.hl || null, sit: o.situation || null };
+    return modal('Диапазоны', '<div class="rb" data-rb></div>', { onOpen: (body) => rangeBrowser(body.firstElementChild, st) });
   }
 
   // ---------- one stored mistake ----------

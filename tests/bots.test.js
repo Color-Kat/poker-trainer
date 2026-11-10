@@ -163,7 +163,7 @@
       const preLog = hand.log.filter((e) => e.street === 'preflop' && e.type !== 'sb' && e.type !== 'bb');
       for (const s of hand.seats) {
         const r = (S[table.players[s].baseStyle] ||= { n: 0, vpip: 0, pfr: 0, br: 0, calls: 0, facing: 0, folds: 0,
-          limped: 0, limpIn: 0, iso: 0, bets: [], shoves: 0, big: { strong: 0, medium: 0, draw: 0, bluff: 0, n: 0 }, lateRaises: [] });
+          limped: 0, limpIn: 0, iso: 0, ct: 0, ctBet: 0, bets: [], shoves: 0, big: { strong: 0, medium: 0, draw: 0, bluff: 0, n: 0 }, lateRaises: [] });
         const mine = hand.log.filter((e) => e.seat === s);
         const pre = mine.filter((e) => e.street === 'preflop');
         r.n++;
@@ -185,10 +185,15 @@
           }
           if (e.type === 'call') r.calls++;
           if (e.facing > 0) { r.facing++; if (e.type === 'fold') r.folds++; }
+          if (e.facing === 0 && (e.type === 'check' || e.type === 'bet')) { r.ct++; r.ctBet += e.type === 'bet'; }
         }
       }
     }
     U.seed(null);
+    // nobody "almost always checks": every style bets often enough when checked to, in style order
+    const betX = (st) => S[st].ctBet / S[st].ct, MIN_BETX = { station: 0.12, rock: 0.22, reg: 0.4, maniac: 0.6 };
+    for (const [st, min] of Object.entries(MIN_BETX)) assert.ok(betX(st) >= min, `${st} bets ${(100 * betX(st)).toFixed(1)}% when checked to (min ${100 * min}%)`);
+    assert.ok(betX('station') < betX('rock') && betX('rock') < betX('reg') && betX('reg') < betX('maniac'), 'bet when checked to: ' + Bots.BASE_STYLES.map((st) => st + ' ' + betX(st).toFixed(2)));
     // tight styles stay tight behind limpers: the reg isolates TAG-like (tight early, wider late), well below the maniac
     const enters = (st) => S[st].limpIn / S[st].limped;
     assert.ok(S.reg.iso / S.reg.limped <= 0.35 && enters('reg') < 0.65 * enters('maniac'), `reg raises ${S.reg.iso}/${S.reg.limped} limped pots`);

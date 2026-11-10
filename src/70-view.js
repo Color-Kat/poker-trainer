@@ -20,10 +20,32 @@ const View = (() => {
   // Escape plain text and colour suit symbols: 'A♥ K♥' → 'A<span class="s-red">♥</span> …'
   const suitText = (text) => U.esc(text).replace(/[♥♦]/g, '<span class="s-red">$&</span>');
 
-  // Feedback block: fb = {verdict:'correct'|'acceptable'|'mistake'|'info', title, lines:[...]}
+  // 13×13 range grid from Ranges.grid(key, ctx); hl = the hero's hand code, outlined.
+  const RG_LEGEND = { raise: 'Рейз', in: 'Играть', call: 'Колл', border: 'Граница', out: 'Сброс' };
+  function gridCells(key, ctx) {
+    const g = Ranges.grid(key, ctx).flat();
+    // ponytail: Ranges.grid knows no 'limped:POS' yet — fall back to the position's open range (= raise over limpers)
+    if (String(key).startsWith('limped:') && g.every((c) => c.cls === 'out')) {
+      return Ranges.grid(key.slice(7), ctx).flat().map((c) => ({ code: c.code, cls: c.cls === 'in' ? 'raise' : c.cls }));
+    }
+    return g;
+  }
+  function rangeGridHTML(key, hl, ctx) {
+    let cells;
+    try { cells = gridCells(key, ctx); } catch (e) { return ''; }
+    const used = Object.keys(RG_LEGEND).filter((k) => cells.some((c) => c.cls === k));
+    return `<div class="rg"><div class="rg-g" role="img" aria-label="Сетка рук${hl ? ', твоя рука ' + U.esc(hl) : ''}">${cells.map((c) =>
+      `<span class="rg-${U.esc(c.cls)}${c.code === hl ? ' rg-hl' : ''}">${U.esc(c.code)}</span>`).join('')}</div>
+      <div class="rg-leg">${used.map((k) => `<span><i class="rg-${k}"></i>${RG_LEGEND[k]}</span>`).join('')}${hl ? '<span><i class="rg-hl"></i>Твоя рука</span>' : ''}</div></div>`;
+  }
+
+  // Feedback block: fb = {verdict:'correct'|'acceptable'|'mistake'|'info'|'teach', title, lines:[...], more?:[...], grid?:{key, hl}}
+  // lines are always shown; the grid under them; `more` collapsed under «Подробнее».
   function feedbackHTML(fb) {
-    const lines = (fb.lines || []).map((l) => `<div class="fb-line">${suitText(l)}</div>`).join('');
-    return `<div class="fb ${fb.verdict || 'info'}"><div class="fb-title v-${fb.verdict || 'info'}">${suitText(fb.title || '')}</div>${lines}</div>`;
+    const v = fb.verdict || 'info', row = (l) => `<div class="fb-line">${suitText(l)}</div>`;
+    const grid = fb.grid && fb.grid.key ? rangeGridHTML(fb.grid.key, fb.grid.hl) : '';
+    const more = fb.more && fb.more.length ? `<details class="fb-more"><summary>Подробнее</summary>${fb.more.map(row).join('')}</details>` : '';
+    return `<div class="fb ${v}"><div class="fb-title v-${v}">${suitText(fb.title || '')}</div>${(fb.lines || []).map(row).join('')}${grid}${more}</div>`;
   }
 
   function el(html) {
@@ -69,5 +91,5 @@ const View = (() => {
     if (typeof document !== 'undefined') document.querySelectorAll('.toast-wrap .toast').forEach((t) => t.remove());
   }
 
-  return { cardHTML, cardsHTML, suitText, feedbackHTML, el, modal, toast, clearToasts };
+  return { cardHTML, cardsHTML, suitText, feedbackHTML, rangeGridHTML, el, modal, toast, clearToasts };
 })();

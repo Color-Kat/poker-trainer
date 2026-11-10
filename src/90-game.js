@@ -5,7 +5,7 @@ const Game = (() => {
   const LEVELS = [[10, 20], [15, 30], [20, 40], [30, 60], [40, 80], [50, 100], [75, 150], [100, 200], [150, 300], [200, 400],
     [300, 600], [400, 800], [500, 1000], [700, 1400], [1000, 2000], [1500, 3000], [2000, 4000], [3000, 6000], [5000, 10000]];
   const LOOK_MS = { slow: 3000, normal: 2000, fast: 1600 };
-  const QCAT = { outs: 'outs', cards: 'outs', equity: 'equity', potodds: 'potodds' };
+  const QCAT = { outs: 'outs', cards: 'outs', equity: 'equity', potodds: 'potodds', sizing: 'potodds', bluff: 'potodds' };
   const CANCEL = { cancelled: true };
   const fmt = U.fmt;
   let S = null;
@@ -33,8 +33,10 @@ const Game = (() => {
     return t;
   }
   // Holds while paused, and on narrow screens while the coach sheet covers the table (the player is reading).
+  // Fast-forward (S.skip): every wait returns at once — no think delays, no reading holds.
   async function wait(ms) {
     const s = S, tok = s.token;
+    if (s.skip) { await U.sleep(0); if (tok.cancelled) throw CANCEL; return; }
     const held = () => s.paused || (!auto() && UI.held);
     let left = ms * speed(), h;
     do {
@@ -43,6 +45,7 @@ const Game = (() => {
       const step = h ? 100 : Math.min(left, 50);
       await U.sleep(step);
       if (tok.cancelled) throw CANCEL;
+      if (s.skip) break;
       if (!h) left -= step;
     } while (left > 0 || h);
     if (UI.holding) UI.holding(false);
@@ -75,7 +78,8 @@ const Game = (() => {
   }
   function stop() { if (S) { S.token.kill(); S = null; } if (View.clearToasts) View.clearToasts(); } // toasts belong to the game left
   function toMenu() { stop(); Screens.menu({ onStart: start }); }
-  const state = () => (S ? { table: S.table, hand: S.hand, mode: S.mode, over: S.over, paused: S.paused } : null);
+  const state = () => (S ? { table: S.table, hand: S.hand, mode: S.mode, over: S.over, paused: S.paused, canSkip: canSkip(),
+    teacher: !!S.teacher, heroPos: S.mode === 'tournament' ? 'any' : S.st.heroPos } : null);
 
   const handlers = {
     cheat: () => withPause(Screens.cheatSheet()),
@@ -90,12 +94,10 @@ const Game = (() => {
       const h = S.hint && S.hint();
       S.hint = null;
       UI.render();
-      if (h) { UI.coachFb({ kind: 'hint', verdict: 'info', title: h.title || '💡 Подсказка', lines: h.lines || [] }); UI.openSheet('coach'); }
+      if (h) { UI.coachFb({ kind: 'hint', verdict: 'info', ...h, title: h.title || '💡 Подсказка', lines: h.lines || [] }); UI.openSheet('coach'); }
     },
-    range: () => {
-      const k = S.rangeKey;
-      if (k) withPause(Screens.rangeModal(k, k === 'vsRaise' ? 'Против рейза' : k === 'vs3bet' ? 'Против рейза и ререйза' : `Диапазон открытия: ${k}`));
-    },
+    range: () => openRanges(),
+    skip: () => skipHand(),
     reveal: (seat) => { if (S.mode === 'learn' && P(seat)) P(seat).revealed = true; },
   };
 
@@ -113,14 +115,15 @@ const Game = (() => {
       players.push({ ...b, stack });
     }
     const table = Engine.createTable({ players, sb: LEVELS[0][0], bb: LEVELS[0][1], button: U.randInt(0, n - 1) });
-    const anim = auto() ? 0 : Settings.speedFactor();
+    const anim = auto() ? 0 : Settings.speedFactor(); // S.anim drops to 0 while a hand is fast-forwarded (S.anim0 keeps it)
     document.documentElement.style.setProperty('--speed', String(Math.max(anim, 0.01)));
     S = {
-      mode, st, table, hand: null, token: newToken(), paused: false, pausedMs: 0, pausedAt: 0, anim, startStack: stack,
+      mode, st, table, hand: null, token: newToken(), paused: false, pausedMs: 0, pausedAt: 0, anim, anim0: anim, startStack: stack,
       level: 0, levelInfo: null, notes: [], thinkHist: [], decisions: 0, lastTimingAt: -99,
       places: [], tMistakes: [], over: null, ctx: null,
       boardShown: 0, reveal: new Set(), winners: null, payouts: null, hl: null, acts: {}, turn: null, caption: '', paid: false,
-      hint: null, rangeKey: null, asking: false,
+      hint: null, asking: false, skip: false, lastPre: null, advise: null, adviceShown: false,
+      teacher: mode === 'learn' && st.teacher,
     };
     Stats.beginSession(mode);
     if (hasCoach() && Coach.timing) Coach.timing.reset();
@@ -186,14 +189,19 @@ const Game = (() => {
 
   // ---------- one hand ----------
   async function playHand() {
-    const { table } = S;
+    const { table, mode } = S;
     Object.assign(S, { boardShown: 0, reveal: new Set(), winners: null, payouts: null, hl: null, acts: {}, turn: null,
-      caption: '', paid: false, hint: null, rangeKey: null, asking: false });
+      caption: '', paid: false, hint: null, asking: false, skip: false, anim: S.anim0, advise: null });
     UI.coachClear();
     UI.logReset();
+    const lock = mode !== 'tournament' && S.st.heroPos !== 'any' ? S.st.heroPos : null;
+    const locked = lock && lockButton(table, lock);
     const hand = Engine.startHand(table);
+    if (locked && hand.pos[0] !== lock) console.warn(`position lock: wanted ${lock}, got ${hand.pos[0]}`);
+    const rig = mode === 'tournament' ? 'off' : S.st.dealAssist;
+    rigHole(hand, rig); // before anything is shown
     S.hand = hand;
-    S.ctx = { spots: [], reads: [], missed: [], seen: [], think: {}, shownThink: {}, vpip: new Set(), pfr: new Set(), review: [], humanLast: null };
+    S.ctx = { spots: [], reads: [], missed: [], seen: [], tells: [], think: {}, shownThink: {}, vpip: new Set(), pfr: new Set(), review: [], humanLast: null };
     for (const s of hand.seats) if (s !== 0) table.players[s].hud.hands++;
     for (const t of S.notes) UI.logLine(t, 'note');
     UI.logStreet('preflop');
@@ -206,11 +214,13 @@ const Game = (() => {
         if (hand.toAct === 0) await humanTurn(); else await botTurn(hand.toAct);
       } else {
         if (hand.bets.some((b) => b > 0)) { UI.collect(280 * S.anim); await wait(320); }
+        if (Engine.inHand(hand, 0) && !hand.allIn[0] && hand.seats.some((s) => s !== 0 && !hand.folded[s] && !hand.allIn[s])) rigBoard(hand, rig);
         const ev = Engine.advance(hand);
         if (ev.returned) UI.logLine(`${P(ev.returned.seat).name}: несыгранная ставка ${fmt(ev.returned.amount)} возвращена`, 'note');
         if (ev.type === 'street') await onStreet(ev); else await onResult(ev);
       }
     }
+    S.anim = S.anim0;
   }
 
   const ACT = { fold: () => 'сброс', check: () => 'чек', call: (e) => `колл ${fmt(e.add)}`, bet: (e) => `ставка ${fmt(e.to)}`,
@@ -250,7 +260,7 @@ const Game = (() => {
     }
     S.turn = null;
     afterAction(seat, entry);
-    if (Bots.betReaction && Engine.inHand(hand, 0)) {
+    if (Bots.betReaction && Engine.inHand(hand, 0) && !S.skip) {
       const r = Bots.betReaction({ table, hand, seat, entry });
       if (r) { UI.bubble(seat, r, 2200 * speed()); S.ctx.seen.push(r); }
     }
@@ -275,29 +285,36 @@ const Game = (() => {
 
   async function humanTurn() {
     const { hand, table, mode, st } = S, ctx = S.ctx;
-    const street = hand.street, pre = street === 'preflop';
+    const street = hand.street, pre = street === 'preflop', tour = mode === 'tournament';
     const legal = Engine.legal(hand);
+    const quiz = !tour && (mode === 'learn' || U.chance(st.practiceFreq / 100)); // practice: some decisions get questions
     let spot = null;
     S.turn = 0;
     if (pre) {
-      const sit = Ranges.situation(hand, 0);
-      S.rangeKey = mode === 'tournament' ? null : sit.kind === 'vsRaise' || sit.kind === 'vs3bet' ? sit.kind : sit.pos;
+      S.lastPre = hand; // the range modal shows this decision (Ranges.mySituation), also after the hand
       S.hint = mode === 'learn' ? () => Ranges.hint(hand, 0, table) : null;
       if (mode === 'learn' && st.questions.preflop) UI.coachAdd(situationHTML(hand), 'c-prompt', `Твой ход: ${hand.pos[0]}, ${Cards.strList(hand.hole[0])}`);
       UI.render();
+      if (quiz && typeof Ranges.questions === 'function') await askQs(Ranges.questions(hand, 0, table, st) || [], null);
+      S.advise = tour || typeof Ranges.advise !== 'function' ? null : () => Ranges.advise(hand, 0, table);
     } else {
       UI.render();
       spot = hasCoach() ? Coach.analyze(hand, 0, table) : null;
       if (spot) ctx.spots.push(spot);
-      if (mode !== 'tournament') {
+      if (!tour) {
         await askRead();
-        if (spot && (mode === 'learn' || U.chance(st.practiceFreq / 100))) await askSpot(spot);
+        if (spot && quiz) await askSpot(spot);
       }
+      S.advise = tour || !spot || typeof Coach.advise !== 'function' ? null : () => Coach.advise(spot);
     }
+    S.adviceShown = false;
+    const adv = S.teacher ? showAdvice() : null; // after the quizzes: the teacher must not give the answers away
     const t0 = U.now(), p0 = pausedTotal(S);
-    const action = await guard(UI.askAction(legal, auto() ? autoAction(legal) : null));
+    const pending = UI.askAction(legal, auto() ? autoAction(legal) : null);
+    suggestSize(adv);
+    const action = await guard(pending);
     const ms = auto() ? U.randInt(800, 3000) : U.now() - t0 - (pausedTotal(S) - p0); // paused time is not thinking time
-    S.hint = null; S.rangeKey = null;
+    S.hint = null; S.advise = null;
     // evaluate against the pre-action state
     const pfb = pre && st.questions.preflop ? Ranges.evaluate(hand, 0, action, table) : null;
     const afb = spot ? Coach.evaluateAction(spot, action) : null;
@@ -305,6 +322,10 @@ const Game = (() => {
     const entry = Engine.act(hand, action);
     S.turn = null;
     afterAction(0, entry);
+    // a bet/raise (e.g. a bluff) gets its own quiz right away, before the bots answer; then the verdict
+    if (spot && quiz && (entry.type === 'bet' || entry.type === 'raise') && typeof Coach.afterActionQuestions === 'function') {
+      await askQs(Coach.afterActionQuestions(spot, action, st) || [], spot);
+    }
     if (pfb) judge(pfb, 'preflop', { pos: hand.pos[0] });
     if (afb) judge(afb, 'action');
     ctx.humanLast = { street, type: entry.type, thinkMs: ms };
@@ -317,18 +338,42 @@ const Game = (() => {
       if (w && S.decisions - S.lastTimingAt >= 10) {
         S.lastTimingAt = S.decisions;
         const fb = { kind: 'timing', verdict: 'acceptable', title: '⚠️ Тайминг выдаёт силу руки', lines: [w], boardN: S.boardShown };
-        if (mode === 'tournament') ctx.review.push(fb); else UI.coachFb(fb);
+        if (tour) ctx.review.push(fb); else UI.coachFb(fb);
       }
     }
+    if (entry.type === 'fold' && st.autoSkipFolded) skipHand();
   }
 
-  // Feedback per mode: learn — always; practice — unless correct; tournament — mistakes queued for the review.
+  // ---------- teacher: the best action and why, shown before the hero acts ----------
+  function showAdvice() {
+    const a = S.advise && S.advise();
+    if (!a) return null;
+    S.adviceShown = true;
+    if (typeof UI.showAdvice === 'function') UI.showAdvice(a);
+    else UI.coachFb({ kind: 'teacher', verdict: 'info', title: a.title, lines: a.lines || [], more: a.more, grid: a.grid });
+    return a;
+  }
+  // The suggested bet goes into the raise box (only while the action panel is open).
+  function suggestSize(a) {
+    if (a && a.size && (a.best === 'bet' || a.best === 'raise') && UI.acting) UI.setAmount(a.size);
+  }
+  function setTeacher(on) {
+    if (!S || S.mode === 'tournament') return;
+    S.teacher = !!on;
+    if (S.mode === 'learn') { Settings.set({ teacher: S.teacher }); S.st.teacher = S.teacher; }
+    if (S.teacher && UI.acting && !S.adviceShown) suggestSize(showAdvice());
+    UI.render();
+  }
+
+  // Feedback per mode: learn — always (a correct verdict as one short line); practice — unless correct;
+  // tournament — mistakes queued for the review.
   function judge(fb, cat, opts) {
     const ok = fb.verdict !== 'mistake';
     fb.boardN = S.boardShown; // the board the player saw when deciding (tournament review)
     Stats.record(cat, ok, opts);
     if (!ok) addMistake(fb, cat);
-    if (S.mode === 'learn' || (S.mode === 'practice' && fb.verdict !== 'correct')) UI.coachFb(fb);
+    if (S.mode === 'learn') UI.coachFb(fb.verdict === 'correct' ? { kind: fb.kind, verdict: fb.verdict, title: fb.title, lines: [] } : fb);
+    else if (S.mode === 'practice' && fb.verdict !== 'correct') UI.coachFb(fb);
     else if (S.mode === 'tournament' && !ok) S.ctx.review.push(fb);
   }
   function addMistake(fb, cat) {
@@ -345,31 +390,59 @@ const Game = (() => {
     const sub = `${b.name}: ставка ${fmt(hand.bets[rq.bettor])}` + (rq.sizeFrac ? ` — ${U.pct(rq.sizeFrac)} банка` : '');
     S.asking = true; UI.render();
     const q = { id: 'read', type: 'choice', prompt: 'Что, скорее всего, у соперника?', options: rq.options };
-    const answer = await guard(UI.askQuestion(q, { sub, hole: hand.hole[0], board: hand.board }, auto() ? U.pick(rq.options).v : null));
+    const answer = await guard(UI.askQuestion(q, { sub, hole: hand.hole[0], board: hand.board }, auto() ? autoAnswer(q, null) : null));
     S.asking = false;
     S.ctx.reads.push({ read: rq, answer, thinkMs: S.ctx.think[rq.bettor], shownMs: S.ctx.shownThink[rq.bettor], boardN: S.boardShown, tellsSeen: S.ctx.seen.filter((r) => r.seat === rq.bettor) });
   }
 
   async function askSpot(spot) {
-    const { hand, mode, st } = S;
-    const qs = Coach.questions(spot, st) || [];
-    const answers = {};
+    const qs = Coach.questions(spot, S.st) || [];
     spot.asked = qs.some((q) => q.id === 'outs' || q.id === 'equity'); // the post-hand real equity checks this estimate
+    await askQs(qs, spot);
+  }
+
+  // Asks the questions one after another. A wrong answer shows its short correction and the next question
+  // follows right away — the sequence never stops. spot = null: preflop questions.
+  async function askQs(qs, spot) {
+    if (!qs.length) return;
+    const { hand, mode } = S;
+    const answers = {};
     S.asking = true;
     for (let i = 0; i < qs.length; i++) {
       const q = qs[i];
       S.hint = mode === 'learn' && q.hint ? () => (typeof q.hint === 'string' ? { title: '💡 Подсказка', lines: [q.hint] } : q.hint) : null;
       UI.render();
-      const v = await guard(UI.askQuestion(q, { n: i + 1, of: qs.length, hole: hand.hole[0], board: hand.board, short: !!spot.short }, auto() ? autoAnswer(q, spot) : null));
+      const v = await guard(UI.askQuestion(q, { n: i + 1, of: qs.length, hole: hand.hole[0], board: hand.board, short: !!(spot && spot.short) }, auto() ? autoAnswer(q, spot || q.spot) : null));
       S.hint = null;
-      const fb = Coach.check(spot, q.id, v, { ...answers });
+      const fb = checkQ(q, v, { ...answers }, spot);
       answers[q.id] = v;
+      if (!fb) continue;
       const cat = QCAT[q.id] || 'outs';
       Stats.record(cat, !!fb.ok);
       if (!fb.ok) addMistake(fb, cat);
       if (mode === 'learn' || !fb.ok) UI.coachFb(fb);
     }
     S.asking = false;
+    UI.render();
+  }
+  // Preflop questions carry their own pot spot (q.spot), graded like the postflop ones.
+  function checkQ(q, v, answers, spot) {
+    const sp = spot || q.spot;
+    return sp && hasCoach() ? Coach.check(sp, q.id, v, answers) : null;
+  }
+
+  // Tells quiz: after the hero looked at the players, what did one shown reaction mean? Graded after the hand.
+  async function askTell(r) {
+    const { hand, table, mode, st } = S;
+    if (mode === 'tournament' || !st.questions.tells || !hasCoach() || typeof Coach.tellQuestion !== 'function') return;
+    if (mode !== 'learn' && !U.chance(st.practiceFreq / 100)) return;
+    const q = Coach.tellQuestion(r, table);
+    if (!q) return;
+    S.asking = true; UI.render();
+    const answer = await guard(UI.askQuestion(q, { hole: hand.hole[0], board: hand.board.slice(0, S.boardShown) }, auto() ? autoAnswer(q, null) : null));
+    S.asking = false;
+    S.ctx.tells.push({ reaction: r, answer, boardN: S.boardShown });
+    UI.closeSheet(); // nothing to read until the review: phones get the table back (an open sheet holds the game)
     UI.render();
   }
 
@@ -385,6 +458,7 @@ const Game = (() => {
       await wait(1000);
     }
     const bots = hand.seats.filter((s) => s !== 0 && !hand.folded[s]);
+    let tell = null;
     if (!runout && Engine.inHand(hand, 0) && !hand.allIn[0] && bots.length && st.questions.tells) {
       const reactions = bots.map((seat) => Bots.streetReaction({ table, hand, seat, newCards: ev.cards })).filter(Boolean);
       S.caption = '';
@@ -397,12 +471,14 @@ const Game = (() => {
         S.caption = reactions.length ? '' : 'Никто ничем себя не выдал';
         UI.render();
         await wait(2000);
+        if (reactions.length) tell = U.pick(reactions);
       } else if (reactions.length) S.ctx.missed.push({ street: ev.street, reactions });
     }
     S.boardShown = hand.board.length;
     S.caption = '';
     UI.logStreet(ev.street, hand.board.slice());
     UI.render();
+    if (tell) await askTell(tell);
     await wait(runout ? 1100 : 450);
   }
 
@@ -456,6 +532,15 @@ const Game = (() => {
         shownSeconds(fb, r.thinkMs, r.shownMs);
         Stats.record('read', fb.verdict !== 'mistake');
         if (fb.verdict === 'mistake') addMistake(fb, 'read');
+        items.push(fb);
+      }
+      for (const t of ctx.tells) {
+        const fb = typeof Coach.tellReview === 'function' && Coach.tellReview(t.reaction, t.answer, hand, table);
+        if (!fb) continue;
+        fb.boardN = t.boardN;
+        const ok = fb.ok !== undefined ? !!fb.ok : fb.verdict !== 'mistake';
+        Stats.record('tells', ok);
+        if (!ok) addMistake(fb, 'tells');
         items.push(fb);
       }
       for (const m of ctx.missed) { const fb = Coach.lookHint(m.reactions, table, m.street); if (fb) { fb.boardN = BOARD_N[m.street]; items.push(fb); } }
@@ -542,6 +627,136 @@ const Game = (() => {
     Screens.results(summary, { onMenu: toMenu, onAgain: () => start('tournament') });
   }
 
+  // ---------- fast-forward: the hero has nothing left to decide ----------
+  function canSkip() {
+    const h = S && S.hand;
+    if (!h || h.phase === 'done' || S.skip || S.over || !h.dealt[0]) return false;
+    const others = h.seats.some((s) => s !== 0 && !h.folded[s] && !h.allIn[s]);
+    return !!(h.folded[0] || h.allIn[0] || (!others && h.toAct !== 0));
+  }
+  // The rest of the hand plays out with no waits, bubbles or animations; HUD and review are computed as usual.
+  function skipHand() {
+    if (!canSkip()) return false;
+    S.skip = true;
+    S.anim = 0;
+    UI.render();
+    return true;
+  }
+
+  // ---------- range modal with the hero's latest preflop decision (this hand or the last one) ----------
+  function openRanges() {
+    if (!S) return null;
+    const h = S.hand;
+    // tournament: no help with the decision being made right now
+    const now = h && h.phase === 'betting' && h.street === 'preflop' && h.toAct === 0;
+    const last = S.mode === 'tournament' && now ? null : S.lastPre;
+    const situation = last ? Ranges.mySituation(last, 0) : null;
+    const ref = last || h;
+    return withPause(Screens.rangeModal({ situation, pos: ref ? ref.pos[0] : null, n: ref ? ref.order.length : S.table.players.length,
+      hl: situation ? situation.hl : null }));
+  }
+
+  // ---------- position lock ----------
+  function lockPos(label) {
+    if (!S) return;
+    const ok = label && Engine.positionNames(S.table.players.length).includes(label);
+    S.st.heroPos = ok ? label : 'any';
+    Settings.set({ heroPos: S.st.heroPos });
+    UI.render();
+  }
+  const eligible = (p) => !p.busted && p.stack > 0;
+  // The button seat that gives the hero (seat 0) `label` — the same seat/label mapping as Engine.startHand.
+  function buttonFor(table, label) {
+    const P = table.players, N = P.length;
+    if (!eligible(P[0])) return null;
+    for (let btn = 0; btn < N; btn++) {
+      if (!eligible(P[btn])) continue;
+      const seats = [];
+      for (let k = 1; k <= N; k++) if (eligible(P[(btn + k) % N])) seats.push((btn + k) % N);
+      const order = seats.length === 2 ? [btn, seats[0]] : [...seats.slice(2), ...seats.slice(0, 2)];
+      if (Engine.positionNames(seats.length)[order.indexOf(0)] === label) return btn;
+    }
+    return null;
+  }
+  // Points table.button so that startHand's own move (next eligible seat when handNo > 0) lands on the wanted
+  // button; heads-up startHand gives the button to last hand's BB, so lastBB points there too.
+  function lockButton(table, label) {
+    const btn = buttonFor(table, label);
+    if (btn === null) return false;
+    const N = table.players.length;
+    table.button = table.handNo > 0 ? (btn - 1 + N) % N : btn;
+    table.lastBB = btn;
+    return true;
+  }
+
+  // ---------- training deal (dealAssist): cards are swapped inside hand.deck, the engine never knows ----------
+  const RIG = { normal: { pre: 0.6, post: 0.4 }, strong: { pre: 0.85, post: 0.6 } };
+  // Preflop teaching mix for a position: [weight, codes] — in range, border, looks playable but folds here, speculative.
+  function rigCodes(pos) {
+    const inR = Ranges.open(pos), bord = Ranges.border(pos), all = Cards.HAND_CODES;
+    const looks = (c) => { const { hi, lo, type } = Cards.codeInfo(c); return type === 'p' || hi === 14 || lo >= 10 || (type === 's' && hi >= 12); };
+    const spec = (c) => { const { hi, lo, type } = Cards.codeInfo(c); return type === 's' && (hi === 14 || (hi - lo <= 2 && lo >= 4)); };
+    return [[0.45, [...inR]], [0.25, [...bord]], [0.2, all.filter((c) => !inR.has(c) && !bord.has(c) && looks(c))], [0.1, all.filter(spec)]];
+  }
+  function pickWeighted(list) {
+    const ok = list.filter(([, xs]) => xs.length);
+    let r = U.rng() * U.sum(ok.map(([w]) => w));
+    for (const [w, xs] of ok) if ((r -= w) < 0) return xs;
+    return ok[ok.length - 1][1];
+  }
+  // Maybe replaces the hero's hole cards with a teachable hand; returns its code or null. Only cards from the deck
+  // (or the hero's own) are used, the old hole cards take their slots: the deck stays a permutation, bots keep theirs.
+  function rigHole(hand, level) {
+    const p = RIG[level], old = hand.hole[0];
+    if (!p || !old || !U.chance(p.pre)) return null;
+    const free = new Set([...hand.deck, ...old]);
+    for (const code of U.shuffle(pickWeighted(rigCodes(hand.pos[0])).slice())) {
+      const combo = U.shuffle(Cards.codeToCombos(code)).find(([a, b]) => free.has(a) && free.has(b));
+      if (!combo) continue;
+      const spare = old.filter((c) => !combo.includes(c));
+      for (const c of combo) { const i = hand.deck.indexOf(c); if (i >= 0) hand.deck[i] = spare.shift(); }
+      hand.hole[0] = combo.slice();
+      return code;
+    }
+    return null;
+  }
+  // What the hero has after `board`: teaching tags (draws, overcards, top/second pair).
+  function spotTags(hole, board) {
+    const cards = hole.concat(board), cat = HandEval.cat(HandEval.score(cards)), C = HandEval.CAT;
+    const mask = (cs) => cs.reduce((m, c) => m | (1 << Cards.rank(c)), 0), m = mask(cards), bm = mask(board);
+    const suitN = [0, 0, 0, 0];
+    cards.forEach((c) => suitN[Cards.suit(c)]++);
+    const fd = cat < C.FLUSH && hole.some((c) => suitN[Cards.suit(c)] === 4);
+    let st = 0; // ranks that complete a straight using a hole card
+    if (cat < C.STRAIGHT) for (let r = 2; r <= 14; r++) if (!(m & (1 << r)) && HandEval.straightTop(m | (1 << r)) && !HandEval.straightTop(bm | (1 << r))) st++;
+    const tags = [];
+    if (fd && st) tags.push('combo');
+    else if (fd) tags.push('flushdraw');
+    else if (st >= 2) tags.push('oesd');
+    else if (st === 1) tags.push('gutshot');
+    const br = [...new Set(board.map(Cards.rank))].sort((a, b) => b - a), hr = hole.map(Cards.rank);
+    if (br.length === board.length) { // unpaired board
+      if (cat === C.PAIR && hr.includes(br[0]) && hr[0] !== hr[1]) tags.push('toppair');
+      else if (cat === C.PAIR && hr.includes(br[1]) && hr[0] !== hr[1]) tags.push('secondpair');
+      else if (cat === C.HIGH && Math.min(...hr) > br[0]) tags.push('overcards');
+    }
+    return tags;
+  }
+  // Maybe reorders hand.deck before Engine.advance so the next flop/turn gives the hero a teachable spot:
+  // a target type uniformly among the reachable ones, then a uniform card set of that type. Returns the tag.
+  function rigBoard(hand, level) {
+    const p = RIG[level], n = hand.street === 'preflop' ? 3 : hand.street === 'flop' ? 1 : 0, d = hand.deck;
+    if (!p || !n || !U.chance(p.post)) return null;
+    const hole = hand.hole[0], byTag = {};
+    const tries = n === 1 ? d.map((c) => [c]) : Array.from({ length: 250 }, () => U.shuffle(d.slice()).slice(0, 3));
+    for (const cs of tries) for (const t of spotTags(hole, hand.board.concat(cs))) (byTag[t] = byTag[t] || []).push(cs);
+    const tags = Object.keys(byTag);
+    if (!tags.length) return null;
+    const tag = U.pick(tags), cs = U.pick(byTag[tag]);
+    cs.forEach((c, k) => { const i = d.indexOf(c), j = d.length - 1 - k; [d[i], d[j]] = [d[j], d[i]]; }); // deck.pop() deals from the end
+    return tag;
+  }
+
   // ---------- autoplay (test hook) ----------
   function autoAction(L) {
     const h = S.hand, r = U.rng();
@@ -552,14 +767,20 @@ const Game = (() => {
     if (L.canRaise && r > 0.8) return { type: 'raise', to: size() };
     return { type: 'call' };
   }
+  // Game.autoWrong = true → every autoplay answer is wrong (tests: the question sequence must go on).
   function autoAnswer(q, spot) {
-    const right = { outs: spot.correctOuts, cards: spot.cardsToSee, equity: spot.ruleEq, potodds: spot.needed }[q.id];
+    const right = q.answer !== undefined ? q.answer
+      : spot ? { outs: spot.correctOuts, cards: spot.cardsToSee, equity: spot.ruleEq, potodds: spot.needed }[q.id] : undefined;
     if (q.type === 'choice') {
       const vals = (q.options || []).map((o) => (o && typeof o === 'object' ? o.v : o));
+      const wrong = vals.filter((v) => String(v) !== String(right));
+      if (api.autoWrong) return U.pick(wrong.length ? wrong : vals);
       return U.chance(0.7) && vals.some((v) => String(v) === String(right)) ? right : U.pick(vals);
     }
+    if (api.autoWrong) return 977;
     return U.chance(0.6) && Number.isFinite(+right) ? Math.round(+right) : U.randInt(0, 40);
   }
 
-  return Object.assign(api, { boot, start, state, toMenu, eliminate, gen, reviewSpots, kickerNote, shownSeconds });
+  return Object.assign(api, { boot, start, state, toMenu, skipHand, openRanges, lockPos, setTeacher,
+    eliminate, gen, reviewSpots, kickerNote, shownSeconds, buttonFor, lockButton, rigHole, rigBoard, spotTags });
 })();

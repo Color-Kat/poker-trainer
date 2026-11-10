@@ -357,8 +357,10 @@ const Bots = (() => {
   const POST = {
     rock(f) {
       const { L, cls, bf } = f;
-      if (!L.toCall) {
-        const p = { strong: 0.6, medium: f.nOpp === 1 ? 0.15 : 0.05, draw: 0.03, bluff: 0.02 }[cls];
+      if (!L.toCall) { // passive = rarely bluffs, not "checks its good hands": value bets small, almost always
+        const cb = f.pfr && f.street === 'flop'; // its preflop raise was strength: a small c-bet, sometimes with AK-high
+        const p = cls === 'strong' ? 0.9 : cls === 'medium' ? (f.a.topPair ? 0.7 : 0.25) * (f.nOpp > 1 ? 0.7 : 1)
+          : cb && f.nOpp === 1 ? 0.35 : cls === 'draw' ? 0.06 : 0.02;
         return U.chance(p) ? potBet(L, rnd(0.33, 0.5)) : CHECK;
       }
       if (f.nuts && L.canRaise) {
@@ -376,7 +378,9 @@ const Bots = (() => {
     station(f) {
       const { L, cls, bf, a } = f;
       if (!L.toCall) {
-        const p = cls === 'strong' ? (f.nuts ? 0.45 : 0.3) : cls === 'medium' ? 0.08 : 0;
+        // stabs small with any pair (a calling station's "blocking" lead), never bluffs
+        // (not when short: a crumb-sized stack turns the stab into an all-in, and its big bets must stay near-nuts)
+        const p = cls === 'strong' ? (f.nuts ? 0.5 : 0.4) : a.pair && f.spr > 2 ? 0.3 : 0;
         return U.chance(p) ? potBet(L, rnd(0.3, 0.45)) : CHECK;
       }
       if (f.nuts && L.canRaise && U.chance(0.55)) return potBet(L, f.street === 'flop' ? 0.5 : rnd(1, 1.3)); // monsters: big later
@@ -391,15 +395,15 @@ const Bots = (() => {
       const size = () => potBet(L, rnd(0.5, 0.75));
       if (!L.toCall) {
         if (street === 'flop' && f.pfr) { // continuation bet
-          const p = { strong: 0.85, medium: 0.7, draw: 0.75, bluff: f.nOpp > 2 ? 0.3 : 0.6 }[cls];
+          const p = { strong: 0.9, medium: 0.75, draw: 0.8, bluff: f.nOpp > 2 ? 0.35 : 0.65 }[cls];
           return U.chance(p) ? size() : CHECK;
         }
-        if (cls === 'strong') return U.chance(0.8) ? (f.nuts && f.river ? potBet(L, rnd(0.75, 1)) : size()) : CHECK;
-        if (cls === 'medium') return U.chance(f.river ? 0.25 : 0.35) ? potBet(L, 0.5) : CHECK;
-        if (cls === 'draw') return U.chance(a.outs >= 12 ? 0.55 : 0.35) ? size() : CHECK;
+        if (cls === 'strong') return U.chance(0.85) ? (f.nuts && f.river ? potBet(L, rnd(0.75, 1)) : size()) : CHECK;
+        if (cls === 'medium') return U.chance(f.a.topPair ? (f.river ? 0.45 : 0.6) : f.river ? 0.15 : 0.3) ? potBet(L, 0.5) : CHECK;
+        if (cls === 'draw') return U.chance(a.outs >= 12 ? 0.7 : 0.5) ? size() : CHECK; // semi-bluff
         if (f.nOpp > 2) return CHECK;
-        if (street === 'flop') return f.ip && f.nOpp === 1 && U.chance(0.25) ? potBet(L, 0.5) : CHECK;
-        return U.chance((f.scary ? 0.3 : 0.1) * (f.ip ? 1 : 0.5)) ? size() : CHECK; // bluff on scary turns/rivers
+        if (street === 'flop') return f.ip && f.nOpp === 1 && U.chance(0.3) ? potBet(L, 0.5) : CHECK;
+        return U.chance((f.scary ? 0.4 : 0.25) * (f.ip ? 1 : 0.75)) ? size() : CHECK; // bluff turns/rivers, more on scary cards
       }
       if (f.nuts && L.canRaise) return U.chance(0.65) ? potBet(L, rnd(0.75, 1)) : CALL;
       if (cls === 'strong') {
@@ -584,7 +588,7 @@ const Bots = (() => {
   const READ_PROFILE = {
     rock: { strong: 0.98, medium: 0.02, draw: 0, bluff: 0 },
     station: { strong: 0.97, medium: 0.03, draw: 0, bluff: 0 },
-    reg: { strong: 0.49, medium: 0.12, draw: 0.09, bluff: 0.3 },
+    reg: { strong: 0.46, medium: 0.11, draw: 0.1, bluff: 0.33 },
     maniac: { strong: 0.13, medium: 0.23, draw: 0.09, bluff: 0.55 },
   };
 

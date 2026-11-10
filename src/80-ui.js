@@ -4,7 +4,7 @@
 const UI = (() => {
   let S = null, H = {}, root = null, tableEl = null, feed = null, logBody = null, side = null, dock = null;
   let seatEls = [], betEls = [], prevBets = [], shownBoard = 0, boardBase = 0;
-  let act = null, nextRes = null, keysBound = false, popSeat = null, tipFor = null;
+  let act = null, nextRes = null, keysBound = false, popSeat = null, tipFor = null, tipSticky = false, adv = null;
   const MODE_RU = { learn: 'Обучение', practice: 'Тренировка', tournament: 'Турнир' };
   const STREET_RU = { preflop: 'Префлоп', flop: 'Флоп', turn: 'Тёрн', river: 'Ривер' };
   const QUICK = ['1/3', '1/2', '2/3', 'Банк', 'Олл-ин'];
@@ -36,9 +36,9 @@ const UI = (() => {
   <header class="g-head">
     <div class="titlebox">
       <div class="brand"><span class="logo">♠</span>Тренажёр покера</div>
-      <div class="g-meta"><span class="mode-badge">${MODE_RU[S.mode]}</span><span class="hinfo"></span></div>
+      <div class="g-meta"><span class="mode-badge">${MODE_RU[S.mode]}</span><button class="pin-chip hidden" data-cmd="unpin" title="Открепить позицию"></button><span class="hinfo"></span></div>
     </div>
-    <nav class="g-nav">${navBtn('cheat', IC.book, 'Шпаргалка')}${navBtn('stats', IC.chart, 'Статистика')}${navBtn('pause', IC.pause, 'Пауза')}${navBtn('menu', IC.exit, 'Меню')}</nav>
+    <nav class="g-nav">${navBtn('teacher', '<span class="emo" aria-hidden="true">👨‍🏫</span>', 'Учитель')}${navBtn('cheat', IC.book, 'Шпаргалка')}${navBtn('stats', IC.chart, 'Статистика')}${navBtn('pause', IC.pause, 'Пауза')}${navBtn('menu', IC.exit, 'Меню')}</nav>
   </header>
   <div class="g-body">
     <main class="g-main">
@@ -73,6 +73,7 @@ const UI = (() => {
           <button class="btn btn-primary act act-raise" data-act="raise"><span>Рейз</span><kbd>R</kbd></button>
         </div>
         <div class="d-next"><button class="btn btn-primary act" data-cmd="next">Следующая раздача</button></div>
+        <div class="d-skip hidden"><button class="btn btn-primary act" data-cmd="skip">⏩ К следующей раздаче</button></div>
       </div></div>
     </main>
     <aside class="side" data-tab="coach">
@@ -105,17 +106,17 @@ const UI = (() => {
     root = app.querySelector('.game');
     tableEl = $('.ptable'); feed = $('.coach-feed'); logBody = $('.log-body'); side = $('.side'); dock = $('.dock');
     $('.coach-feed').dataset.empty = {
-      learn: 'Тренер подскажет на каждом ключевом решении: позиция и диапазон до флопа, ауты, эквити и шансы банка после.',
-      practice: 'Вопросы появляются выборочно. Объяснения — только если ошибёшься.',
-      tournament: 'В турнире подсказок нет. Ошибки разберём после раздачи.',
+      learn: 'Тренер спросит и подскажет на каждом решении.',
+      practice: 'Вопросы — выборочно, объяснения — при ошибке.',
+      tournament: 'Подсказок нет. Ошибки — после раздачи.',
     }[S.mode];
-    if (S.mode === 'tournament' && S.st && S.st.tournamentReview === 'end') $('.coach-feed').dataset.empty = 'В турнире подсказок нет. Все ошибки разберём в конце турнира.';
+    if (S.mode === 'tournament' && S.st && S.st.tournamentReview === 'end') $('.coach-feed').dataset.empty = 'Подсказок нет. Ошибки — в конце турнира.';
     $('.sec-sub').textContent = MODE_RU[S.mode];
     root.addEventListener('click', onClick);
     root.addEventListener('input', onInput);
     root.addEventListener('change', onInput);
-    root.addEventListener('mouseover', (e) => { const t = e.target.closest('[data-tip]'); if (t && !mq('(pointer: coarse)')) showTip(t); });
-    root.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tip]')) hideTip(); });
+    root.addEventListener('mouseover', (e) => { const t = e.target.closest('[data-tip]'); if (t && !tipSticky && !mq('(pointer: coarse)')) showTip(t); });
+    root.addEventListener('mouseout', (e) => { if (e.target.closest('[data-tip]') && !tipSticky) hideTip(); });
     $('.coach-feed').addEventListener('scroll', hideTip, { passive: true });
     if (!keysBound) {
       keysBound = true;
@@ -177,6 +178,13 @@ const UI = (() => {
     pb.title = S.paused ? 'Продолжить' : 'Пауза';
     tog(pb, 'on', S.paused);
     tog($('.veil'), 'hidden', !S.paused);
+    const pin = S.mode !== 'tournament' && S.st && S.st.heroPos && S.st.heroPos !== 'any' ? S.st.heroPos : '';
+    tog($('.pin-chip'), 'hidden', !pin);
+    put($('.pin-chip'), pin ? `📌 ${esc(pin)} <i>✕</i>` : '');
+    const tb = $('[data-cmd="teacher"]');
+    tog(tb, 'on', !!S.teacher);
+    tb.title = S.teacher ? 'Учитель включён — нажми, чтобы выключить' : 'Учитель выключен — нажми, чтобы включить';
+    tb.setAttribute('aria-pressed', String(!!S.teacher));
   }
 
   const SHORT = { rock: 'Камень', station: 'Станция', reg: 'Регуляр', maniac: 'Маньяк', actor: 'Актёр' };
@@ -333,9 +341,15 @@ const UI = (() => {
     put($('span', call), !L ? 'Колл' : L.canCheck ? 'Чек' : L.toCall >= L.stack ? `Олл-ин ${fmt(L.toCall)}` : `Колл ${fmt(L.toCall)}`);
     put($('span', raise), !L ? 'Рейз' : L.canRaise ? raiseLabel(L, amount()) : 'Рейз');
     $('.d-hint', dock).disabled = !(S.hint && S.mode === 'learn');
-    $('.d-range', dock).disabled = !S.rangeKey;
+    $('.d-range', dock).disabled = false; // ranges are reference material: always available
+    const skip = !L && !nextRes && typeof Game !== 'undefined' && Game.state && !!(Game.state() || {}).canSkip;
+    const g = !!(L && S.teacher && adv);
+    tog(fold, 'adv', g && adv === 'fold');
+    tog(call, 'adv', g && (adv === 'check' || adv === 'call'));
+    tog(raise, 'adv', g && (adv === 'bet' || adv === 'raise'));
     tog($('.d-next', dock), 'hidden', !nextRes);
-    tog($('.d-main', dock), 'hidden', !!nextRes);
+    tog($('.d-skip', dock), 'hidden', !skip);
+    tog($('.d-main', dock), 'hidden', !!nextRes || skip);
     put($('.d-msg', dock), dockMsg());
   }
 
@@ -427,7 +441,7 @@ const UI = (() => {
     else if (type === 'raise' && L.canRaise) a = { type: 'raise', to: amount() };
     else return;
     const r = act.resolve;
-    act = null;
+    act = null; adv = null;
     renderDock();
     r(a);
   }
@@ -458,6 +472,7 @@ const UI = (() => {
   function onClick(e) {
     const t = e.target;
     const tipEl = t.closest('[data-tip]');
+    if (tipEl && tipEl.closest('.seat.me')) { stickyTip(tipEl); e.stopPropagation(); return; }
     if (tipEl) { if (tipFor === tipEl) hideTip(); else showTip(tipEl); e.stopPropagation(); return; }
     hideTip();
     const a = t.closest('[data-act]');
@@ -469,7 +484,7 @@ const UI = (() => {
     const tab = t.closest('.side-tabs [data-tab]');
     if (tab) return tabClick(tab.dataset.tab);
     const seat = t.closest('.seat');
-    if (seat && seat.dataset.seat === '0' && t.closest('.plate')) { const pb = $('.posb', seat); if (pb.dataset.tip) { if (tipFor === pb) hideTip(); else showTip(pb); } return; }
+    if (seat && seat.dataset.seat === '0' && t.closest('.plate')) { const pb = $('.posb', seat); if (pb.dataset.tip) stickyTip(pb); return; }
     if (seat && seat.dataset.seat !== '0') return popSeat === +seat.dataset.seat ? hidePop() : showPop(+seat.dataset.seat);
     if (!t.closest('.pop')) hidePop();
   }
@@ -479,6 +494,12 @@ const UI = (() => {
     if (cmd === 'sheet') return side.classList.contains('open') ? closeSheet() : openSheet(side.dataset.tab);
     if (cmd === 'logtoggle') return $('.log').classList.toggle('closed');
     if (cmd === 'reveal') { const s = +el.dataset.seat; if (H.reveal) H.reveal(s); return render(); }
+    const G = typeof Game !== 'undefined' ? Game : {};
+    if (cmd === 'teacher') return G.setTeacher && G.setTeacher(!S.teacher);
+    if (cmd === 'unpin') return G.lockPos && G.lockPos(null);
+    if (cmd === 'lockpos') return G.lockPos && G.lockPos(el.dataset.pos);
+    if (cmd === 'skip' && !H.skip) return G.skipHand && G.skipHand();
+    if (cmd === 'range' && !H.range) return G.openRanges && G.openRanges();
     if (H[cmd]) H[cmd]();
   }
 
@@ -517,7 +538,8 @@ const UI = (() => {
     if (side.dataset.tab === 'coach') $('.tab[data-tab="coach"]').classList.remove('new');
     put($('.tab-x'), '▴');
   }
-  function closeSheet() { side.classList.remove('open'); }
+  // Phones: a pending question keeps the sheet open (the answer box must stay in view).
+  function closeSheet() { if (!wide() && feed.querySelector('.c-q')) return; side.classList.remove('open'); }
   function tabClick(tab) {
     if (side.classList.contains('open') && side.dataset.tab === tab) closeSheet();
     else openSheet(tab);
@@ -529,8 +551,9 @@ const UI = (() => {
   }
 
   function coachClear() {
-    if (!wide()) closeSheet();
     feed.innerHTML = '';
+    adv = null;
+    if (!wide()) closeSheet();
     put($('.coach-foot'), '');
     put($('.peek'), '');
     $('.tab[data-tab="coach"]').classList.remove('new');
@@ -538,7 +561,16 @@ const UI = (() => {
   function coachAdd(html, cls = '', peek = '') {
     const el = View.el(`<div class="c-item c-new ${cls}">${html}</div>`);
     feed.appendChild(el);
-    requestAnimationFrame(() => { if (el.isConnected) feed.scrollTop = Math.max(0, el.offsetTop - feed.offsetTop - 8); });
+    requestAnimationFrame(() => {
+      if (!el.isConnected) return;
+      const top = el.offsetTop - feed.offsetTop - 8, prev = el.previousElementSibling;
+      let y = top;
+      // a question right after a correction: keep the correction in view above it when both fit
+      if (el.classList.contains('c-q') && prev && prev.classList.contains('c-fb')) {
+        y = Math.min(top, Math.max(prev.offsetTop - feed.offsetTop - 8, top + el.offsetHeight + 16 - feed.clientHeight));
+      }
+      feed.scrollTop = Math.max(0, y);
+    });
     flagNew(peek);
     return el;
   }
@@ -546,6 +578,14 @@ const UI = (() => {
   function coachFb(fb) {
     const el = coachAdd(View.feedbackHTML(fb), 'c-fb', `<span class="v-${fb.verdict || 'info'}">${View.suitText(fb.title || '')}</span>`);
     if (S.mode === 'learn' && fb.verdict === 'mistake' && !wide()) openSheet('coach');
+    return el;
+  }
+  // Teacher card (advice = { best, size?, title, lines, more? }): brass card + the best action glows in the dock.
+  function showAdvice(a) {
+    if (!a) return null;
+    adv = a.best;
+    const el = coachAdd(View.feedbackHTML({ ...a, verdict: 'teach' }), 'c-fb c-adv', `<span class="v-teach">${View.suitText(a.title || '')}</span>`);
+    renderDock();
     return el;
   }
   function review(items) {
@@ -679,18 +719,24 @@ const UI = (() => {
   }
   function hidePop() { popSeat = null; if (root) $('.pop').classList.add('hidden'); }
 
-  function showTip(el) {
+  // sticky: the hero's position badge was clicked — the tip stays and offers to lock that position
+  function showTip(el, sticky = false) {
     const tip = $('.tip');
     if (!tip || !el.dataset.tip) return;
-    tipFor = el;
+    tipFor = el; tipSticky = sticky;
     const [title, ...rest] = el.dataset.tip.split('\n');
-    tip.innerHTML = `<b>${esc(title)}</b>${rest.length ? '<br>' + esc(rest.join(' ')) : ''}`;
+    const pos = el.textContent.trim(), locked = S.st && S.st.heroPos === pos;
+    const lock = sticky && S.mode !== 'tournament' && pos
+      ? (locked ? '<button class="btn btn-sm" data-cmd="unpin">Открепить позицию</button>' : `<button class="btn btn-sm" data-cmd="lockpos" data-pos="${esc(pos)}">📌 Закрепить эту позицию</button>`) : '';
+    tip.innerHTML = `<b>${esc(title)}</b>${rest.length ? '<br>' + esc(rest.join(' ')) : ''}${lock}`;
+    tog(tip, 'sticky', sticky);
     tip.classList.remove('hidden');
     const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
     tip.style.left = U.clamp(r.left + r.width / 2 - w / 2, 8, innerWidth - w - 8) + 'px';
     tip.style.top = (r.top - h - 8 < 8 ? r.bottom + 8 : r.top - h - 8) + 'px';
   }
-  function hideTip() { tipFor = null; if (root) { const t = $('.tip'); if (t) t.classList.add('hidden'); } }
+  function hideTip() { tipFor = null; tipSticky = false; if (root) { const t = $('.tip'); if (t) t.classList.add('hidden'); } }
+  function stickyTip(el) { if (tipSticky && tipFor === el) hideTip(); else showTip(el, true); }
 
   // ---------- animations ----------
   const reduced = () => mq('(prefers-reduced-motion: reduce)');
@@ -736,7 +782,7 @@ const UI = (() => {
   }
 
   return {
-    mount, render, askAction, waitNext, askQuestion, askLook, coachClear, coachAdd, coachFb, review,
+    mount, render, askAction, waitNext, askQuestion, askLook, coachClear, coachAdd, coachFb, showAdvice, review,
     logReset, logStreet, logLine, bubble, collect, payout, deal, openSheet, closeSheet, setAmount, holding,
     sidePots, nice, quickSizes, defaultRaise,
     get acting() { return !!act; }, get waitingNext() { return !!nextRes; }, get held() { return held(); },

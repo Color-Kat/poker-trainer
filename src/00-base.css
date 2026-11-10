@@ -119,6 +119,29 @@ label { cursor: pointer; }
 .fb.info { border-color: var(--info); background: var(--info-bg); }
 .fb-title { font-weight: 700; margin-bottom: 4px; }
 .fb-line { color: var(--text); margin: 3px 0; }
+.fb.teach { border: 1px solid var(--brass); border-left-width: 3px; background: linear-gradient(180deg, rgba(214, 170, 82, 0.13), rgba(214, 170, 82, 0.05)); }
+.v-teach { color: var(--brass-hi); }
+.fb-more { margin-top: 4px; }
+.fb-more summary { cursor: pointer; color: var(--text-dim); font-size: 13px; padding: 2px 0; }
+.fb-more summary:hover { color: var(--text); }
+
+/* ---------- range grid (View.rangeGridHTML): fits a 300 px coach column and a wide modal ---------- */
+.rg { container-type: inline-size; max-width: 520px; margin: 8px auto 4px; }
+.rg-g { display: grid; grid-template-columns: repeat(13, minmax(0, 1fr)); gap: 1px; }
+.rg-g span {
+  aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border-radius: 2px; overflow: hidden;
+  font: 600 clamp(7px, 2.75cqi, 13px)/1 var(--font-ui); letter-spacing: -0.04em; color: var(--text-faint);
+}
+.rg-in { background: #1f8a55; color: #effff5 !important; }
+.rg-raise { background: var(--brass); color: #23180a !important; }
+.rg-call { background: #2c6aa8; color: #eef6ff !important; }
+.rg-border { background: repeating-linear-gradient(135deg, rgba(31, 138, 85, 0.8) 0 3px, rgba(31, 138, 85, 0.3) 3px 6px); color: #effff5 !important; }
+.rg-out { background: rgba(255, 255, 255, 0.05); }
+.rg-g .rg-hl { outline: 2px solid #fff; outline-offset: -1px; position: relative; z-index: 1; box-shadow: 0 0 8px 2px rgba(255, 255, 255, 0.7); font-weight: 800; }
+.rg-leg { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: center; margin-top: 6px; font-size: 12px; color: var(--text-dim); }
+.rg-leg span { display: inline-flex; align-items: center; gap: 5px; }
+.rg-leg i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(255, 255, 255, 0.12); }
+.rg-leg i.rg-hl { border: 2px solid #fff; }
 .s-red { color: #ff7083; }
 .s-black { color: inherit; }
 

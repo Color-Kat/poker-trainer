@@ -186,29 +186,49 @@ const Coach = (() => {
     for (const c of Object.keys(WEAK_MIX)) out[c] = (p[c] || 0) * k + WEAK_MIX[c] * (1 - k);
     return out;
   }
+  // Every two-card combo off the board with its class and preflop rank (cached per board).
+  const comboCache = new Map();
+  function comboTable(board) {
+    const key = board.join(',');
+    let t = comboCache.get(key);
+    if (t) return t;
+    const dead = new Set(board), deck = Cards.deck().filter((c) => !dead.has(c));
+    t = { combos: [], cls: [], top: [] };
+    for (let i = 0; i < deck.length; i++) for (let j = i + 1; j < deck.length; j++) {
+      const h = [deck[i], deck[j]];
+      t.combos.push(h); t.cls.push(classify(h, board)); t.top.push(Equity.holeTopPct(h));
+    }
+    if (comboCache.size > 6) comboCache.clear();
+    comboCache.set(key, t);
+    return t;
+  }
+  // The style's preflop range (holeTopPct ≤ LOOSE) weighted by class: mix = {strong, medium, draw, bluff} shares,
+  // or null = every combo of the range equally.
+  function sampler(t, dead, base, mix) {
+    const loose = LOOSE[base] || 0.3, cnt = {};
+    const ok = (k) => t.top[k] <= loose && !dead.has(t.combos[k][0]) && !dead.has(t.combos[k][1]);
+    if (mix) t.combos.forEach((h, k) => { if (ok(k)) cnt[t.cls[k]] = (cnt[t.cls[k]] || 0) + 1; });
+    let acc = 0;
+    const cum = t.combos.map((h, k) => (acc += ok(k) ? (mix ? (mix[t.cls[k]] || 0) / cnt[t.cls[k]] : 1) : 0));
+    return { cum, total: acc };
+  }
+  function pickFrom(t, { cum, total }, dead) {
+    if (!total) { // empty range: any live combo
+      let h;
+      do h = t.combos[Math.floor(U.rng() * t.combos.length)]; while (dead.has(h[0]) || dead.has(h[1]));
+      return h;
+    }
+    const x = U.rng() * total;
+    let lo = 0, hi = cum.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] > x) hi = m; else lo = m + 1; }
+    return t.combos[lo];
+  }
   // Opponent holdings are drawn directly from the weighted combo list (rejection sampling with a few
   // tries cannot reach tight ranges like a rock's); each sample is run out once via Equity.calc.
   function estimateEq(hole, board, opps, iters = 1500) {
-    const dead = new Set([...hole, ...board]), deck = Cards.deck().filter((c) => !dead.has(c));
-    const combos = [], cls = [], top = [];
-    for (let i = 0; i < deck.length; i++) for (let j = i + 1; j < deck.length; j++) {
-      const h = [deck[i], deck[j]];
-      combos.push(h); cls.push(classify(h, board)); top.push(Equity.holeTopPct(h));
-    }
-    const samplers = opps.map(({ base, frac }) => {
-      const mix = betMix(base, frac), loose = LOOSE[base] || 0.3, cnt = {};
-      combos.forEach((h, k) => { if (top[k] <= loose) cnt[cls[k]] = (cnt[cls[k]] || 0) + 1; });
-      let acc = 0;
-      const cum = combos.map((h, k) => (acc += top[k] <= loose ? (mix[cls[k]] || 0) / cnt[cls[k]] : 0));
-      return { cum, total: acc };
-    });
-    const pick = ({ cum, total }) => {
-      if (!total) return combos[Math.floor(U.rng() * combos.length)];
-      const x = U.rng() * total;
-      let lo = 0, hi = cum.length - 1;
-      while (lo < hi) { const m = (lo + hi) >> 1; if (cum[m] > x) hi = m; else lo = m + 1; }
-      return combos[lo];
-    };
+    const t = comboTable(board), dead = new Set(hole);
+    const samplers = opps.map(({ base, frac }) => sampler(t, dead, base, betMix(base, frac)));
+    const pick = (sm) => pickFrom(t, sm, dead);
     let sum = 0, n = 0;
     for (let it = 0; it < iters; it++) {
       const used = new Set(), hands = [hole];
@@ -224,6 +244,81 @@ const Coach = (() => {
     }
     return sum / Math.max(1, n);
   }
+
+  // ---------- fold equity: the real bot logic against sampled holdings ----------
+  const CHECKED = { strong: 0.08, medium: 0.4, draw: 0.22, bluff: 0.3 }; // what a check / call on this street looks like
+  const FE_PROB = { high: 0.6, medium: 0.4, low: 0.2, none: 0.05 };     // without Bots
+  const potOf = (hand) => { const E = eng(); return E && E.pot ? E.pot(hand) : U.sum(hand.committed) - U.sum(hand.returned || []); };
+  // The opponent's line on this street → how to weight its range.
+  function lineMix(hand, s, base) {
+    let e = null;
+    for (const x of hand.log) if (x.street === hand.street && x.seat === s) e = x;
+    if (!e) return null;
+    if (e.type === 'bet' || e.type === 'raise') return betMix(base, e.potBefore > 0 ? e.add / e.potBefore : 0.66);
+    return CHECKED;
+  }
+  // A copy of everything Engine.legal / Bots.decide read, as if `seat` had just bet or raised to betTo.
+  function applyBet(h, hand, seat, betTo) {
+    h.players = hand.players.map((p) => ({ ...p }));
+    for (const k of ['bets', 'committed', 'returned', 'folded', 'allIn', 'acted']) h[k] = (hand[k] || hand.seats.map(() => 0)).slice();
+    h.log = hand.log.slice();
+    const add = Math.max(0, betTo - hand.bets[seat]), potBefore = potOf(hand), raise = betTo - hand.currentBet;
+    h.players[seat].stack -= add; h.bets[seat] += add; h.committed[seat] += add; h.allIn[seat] = h.players[seat].stack <= 0;
+    if (raise >= hand.minRaise) { h.minRaise = raise; h.acted.fill(false); } else h.minRaise = hand.minRaise;
+    h.acted[seat] = true; h.currentBet = Math.max(hand.currentBet, betTo); h.lastRaiser = seat; h.raises = (hand.raises || 0) + 1;
+    h.log.push({ i: hand.log.length, street: hand.street, seat, type: hand.currentBet ? 'raise' : 'bet', add, to: h.bets[seat], allIn: h.allIn[seat],
+      incomplete: raise < hand.minRaise, facing: hand.currentBet - hand.bets[seat], potBefore, potAfter: potBefore + add });
+    h.phase = 'betting';
+  }
+  // Probability that ALL opponents fold to a bet/raise to each of betTos: per opponent ~48/n holdings sampled from its
+  // range (style + line), Bots.decide asked 6 times each; the product over opponents. ponytail: opponents answer
+  // independently (as if each acted first) — no "one calls, the next overcalls" chains.
+  const fpCache = new WeakMap();
+  const SIM_COMBOS = 48, SIM_REPS = 6;
+  function foldProbs(hand, seat, table, betTos) {
+    const opps = hand.seats.filter((s) => s !== seat && !hand.folded[s]);
+    if (!opps.length) return betTos.map(() => 1);
+    if (opps.some((s) => hand.allIn[s])) return betTos.map(() => 0); // an all-in player cannot fold
+    let cache = fpCache.get(hand);
+    if (!cache) fpCache.set(hand, (cache = new Map()));
+    const tag = `${seat}|${hand.street}|${hand.log.length}|`, todo = [...new Set(betTos.filter((b) => !cache.has(tag + b)))];
+    if (todo.length) {
+      const B = bots(), E = eng(), res = todo.map(() => 1);
+      if (!(B && B.decide && E && E.legal)) {
+        for (const o of opps) todo.forEach((_, j) => { res[j] *= FE_PROB[foldEqOf(table.players[o])] || 0.4; });
+      } else {
+        const t = comboTable(hand.board), dead = new Set(hand.hole[seat]), k = Math.max(8, Math.round(SIM_COMBOS / opps.length));
+        for (const o of opps) {
+          if (res.every((x) => x < 0.005)) break; // the product can only shrink
+          const base = baseOf(table.players[o]), sm = sampler(t, dead, base, lineMix(hand, o, base)), counts = new Map();
+          for (let i = 0; i < k; i++) { const c = pickFrom(t, sm, dead); counts.set(c, (counts.get(c) || 0) + 1); }
+          const folds = todo.map(() => 0);
+          let n = 0;
+          for (const [combo, c] of counts) {
+            const h = { ...hand, hole: hand.hole.slice() }; // one object per holding: Bots memoizes its equity per hand object
+            h.hole[o] = combo;
+            todo.forEach((betTo, j) => {
+              applyBet(h, hand, seat, betTo);
+              h.toAct = o;
+              const L = E.legal(h);
+              for (let r = 0; r < SIM_REPS * c; r++) {
+                try { if (B.decide({ table, hand: h, seat: o, legal: L }).action.type === 'fold') folds[j]++; } catch (e) { /* counts as a call */ }
+              }
+            });
+            n += SIM_REPS * c;
+          }
+          todo.forEach((_, j) => { res[j] *= folds[j] / n; });
+        }
+      }
+      todo.forEach((b, j) => cache.set(tag + b, res[j]));
+    }
+    return betTos.map((b) => cache.get(tag + b));
+  }
+  const foldProb = (hand, seat, table, betTo) => foldProbs(hand, seat, table, [betTo])[0];
+  // A frozen copy of the decision point: later Engine.act calls must not change what the spot measures.
+  const snapshot = (hand) => ({ ...hand, players: hand.players.map((p) => ({ ...p })), hole: hand.hole.slice(), board: hand.board.slice(), log: hand.log.slice(),
+    ...Object.fromEntries(['bets', 'committed', 'returned', 'folded', 'allIn', 'acted'].map((k) => [k, (hand[k] || []).slice()])) });
+  const nice = (x, bb) => { const st = Math.max(1, (bb || 20) / 2); return Math.max(st, Math.round(x / st) * st); };
 
   // ---------- spot analysis ----------
   function legalFor(hand, seat, table) {
@@ -253,20 +348,17 @@ const Coach = (() => {
     if (!hole || board.length < 3) return null;
     const lg = legalFor(hand, seat, table), toCall = lg.toCall, facing = toCall > 0;
     const street = hand.street, river = street === 'river';
-    if (river && !facing) return null;
     const oppSeats = hand.seats.filter((s) => s !== seat && !hand.folded[s]);
     if (!oppSeats.length) return null;
     const made = madeInfo(hole, board), outs = river ? NO_OUTS : computeOuts(hole, board);
     const kind = made.strength === 'strong' || made.strength === 'medium' ? 'made' : !river && (outs.total || outs.over) ? 'draw' : 'nodraw';
-    if (!facing && kind !== 'draw') return null;
 
     const nOpp = oppSeats.length, multiway = nOpp >= 2;
     const wager = facing ? lastWager(hand, seat) : null;
     const bettor = wager ? wager.seat : facing ? hand.lastRaiser : null;
     const sizeFrac = wager && wager.potBefore > 0 ? wager.add / wager.potBefore : 0;
     const myBet = hand.bets[seat] || 0, full = Math.max(0, hand.currentBet - myBet);
-    const E = eng();
-    let pot = E && E.pot ? E.pot(hand) : hand.seats.reduce((a, s) => a + paidOf(hand, s), 0);
+    let pot = potOf(hand);
     const short = facing && toCall < full; // hero can only call all-in for less: the excess is not his to win
     if (short) { const lim = paidOf(hand, seat) + toCall; pot = hand.seats.reduce((a, s) => a + Math.min(paidOf(hand, s), lim), 0); }
     const allInSpot = facing && (toCall >= lg.stack || oppSeats.every((s) => hand.allIn[s]));
@@ -284,19 +376,27 @@ const Coach = (() => {
       street, kind, facing, hole: hole.slice(), board, pot, toCall, betTo: hand.currentBet, bettor: facing ? bettor : null, sizeFrac, allInSpot,
       nOpp, multiway, outs, correctOuts, acceptedOuts: overOk ? [correctOuts, correctOuts + outs.over] : [correctOuts],
       cardsToSee, ruleEq: rule(correctOuts), needed, estEq: null, made, foldEq: multiway ? lower(villainFE) : villainFE,
-      seat, myBet, short, canRaise: !!lg.canRaise, overOk, villainFE,
+      seat, myBet, short, canRaise: !!lg.canRaise, overOk, villainFE, stack: lg.stack, bb: hand.bb || 20,
+      minTo: lg.minTo || hand.currentBet * 2 || hand.bb || 20,
       potStart: hand.potAtStreetStart != null ? hand.potAtStreetStart : pot - U.sum(hand.bets),
       opps: oppSeats.map((s) => ({ seat: s, name: P(s).name })),
       villain: { seat: vSeat, name: vp.name, styleName: styleName(vp), base, revealed: !!vp.revealed },
       bigLate: !!(wager && wager.type === 'raise' && sizeFrac >= 0.66 && (street === 'turn' || street === 'river') && (base === 'rock' || base === 'station')),
     };
+    // fold probability of any bet/raise size, measured on a frozen copy of this decision point
+    const snap = snapshot(hand);
+    Object.defineProperty(sp, 'fpAt', { value: (to) => foldProb(snap, seat, table, to) });
     if (facing && (kind === 'made' || river || made.strength === 'weak')) { // a weak pair also has showdown value
       sp.estEq = estimateEq(hole, board, oppSeats.map((s) => ({ base: baseOf(P(s)), frac: s === bettor ? sizeFrac : 0.33 })));
     }
-    Object.assign(sp, kind === 'draw' || (kind === 'nodraw' && !river) ? drawVerdicts(sp) : madeVerdicts(sp));
+    Object.assign(sp, !facing && kind !== 'draw' ? freeVerdicts(sp) : kind === 'draw' || (kind === 'nodraw' && !river) ? drawVerdicts(sp) : madeVerdicts(sp));
+    if (kind === 'nodraw' && sp.canRaise) bluffVerdicts(sp, snap, table);
     // a made hand with a real draw on top (top pair + flush draw …) still asks the outs questions (SPEC 7)
-    sp.drawToo = kind === 'made' && !river && facing && outs.draws.some((d) => REAL_DRAWS.includes(d.type));
-    sp.questions = (kind === 'made' && !sp.drawToo) || river ? ['potodds'] : facing ? ['outs', 'cards', 'equity', 'potodds'] : ['outs'];
+    const realDraw = !river && outs.draws.some((d) => REAL_DRAWS.includes(d.type));
+    sp.drawToo = kind === 'made' && realDraw && facing;
+    const drawQ = !river && (kind === 'draw' || (kind === 'made' && realDraw));
+    const worthBet = !facing && sp.canRaise && (kind === 'made' || (kind === 'draw' && sp.verdicts.raise && sp.verdicts.raise !== M));
+    sp.questions = [drawQ && 'outs', drawQ && facing && 'cards', drawQ && 'equity', facing && 'potodds', worthBet && 'sizing'].filter(Boolean);
     return sp;
   }
 
@@ -348,6 +448,37 @@ const Coach = (() => {
     return res;
   }
 
+  // Nobody bet and the hero has a made hand or air (draws: drawVerdicts). Never fold when the check is free.
+  function freeVerdicts(sp) {
+    const m = sp.made.strength;
+    let res = m === 'strong' || (m === 'medium' && !sp.multiway && sp.street !== 'river')
+      ? { best: 'raise', verdicts: { raise: B, check: OK, fold: M } }    // value: worse hands pay
+      : { best: 'check', verdicts: { check: B, raise: m === 'medium' ? OK : M, fold: M } }; // air: bluffVerdicts decides
+    if (!sp.canRaise) res = { best: 'check', verdicts: { check: B, fold: M } };
+    return res;
+  }
+  // Bluff sizes (½, ⅔, pot; facing a bet — a raise to 3×) against the fold probability of the real bot logic.
+  // margin = fold probability − break-even (bet ÷ (pot + bet)): ≥ 10 pp — the bluff is best, ≥ 0 — acceptable.
+  const BLUFF_SIZES = [0.5, 0.66, 1];
+  const bluffVd = (margin) => (margin >= 0.1 ? B : margin >= 0 ? OK : M);
+  function bluffAt(sp, to, fp) {
+    to = Math.min(Math.max(to, sp.facing ? sp.minTo : 0), sp.myBet + sp.stack);
+    const bet = to - sp.myBet, be = bet / (sp.pot + bet);
+    if (fp === undefined) fp = sp.fpAt(to);
+    return { to, bet, fp, be, margin: fp - be, frac: bet / sp.pot };
+  }
+  function bluffVerdicts(sp, snap, table) {
+    const tos = sp.facing ? [nice(3 * sp.betTo, sp.bb)] : BLUFF_SIZES.map((f) => sp.myBet + nice(f * sp.pot, sp.bb));
+    const opts = [...new Set(tos.map((to) => Math.min(Math.max(to, sp.facing ? sp.minTo : 0), sp.myBet + sp.stack)))];
+    const fps = foldProbs(snap, sp.seat, table, opts);
+    const all = opts.map((to, i) => bluffAt(sp, to, fps[i]));
+    // the most chips won per bluff: fp × pot − (1 − fp) × bet
+    sp.bluff = all.reduce((a, b) => (b.fp * sp.pot - (1 - b.fp) * b.bet > a.fp * sp.pot - (1 - a.fp) * a.bet ? b : a));
+    const vd = bluffVd(sp.bluff.margin), v = sp.verdicts;
+    if (sp.facing) v.raise = vd;                   // fold stays best; a profitable bluff-raise is best too
+    else if (vd === B) { sp.best = 'raise'; v.raise = B; v.check = OK; } else v.raise = vd;
+  }
+
   // ---------- questions ----------
   const OUTS_HINT = 'Посчитай карты, которые сделают руку сильной: флеш-дро — 9 аутов, открытое стрит-дро — 8, гатшот — 4, ' +
     'карманная пара до сета — 2, пара до трипса — 2, вторая пара к своей карте — 3. Каждую карту считай один раз.';
@@ -363,13 +494,60 @@ const Coach = (() => {
         hint: 'Одна карта: ауты × 2. Две карты: ауты × 4, а если аутов больше 8 — ауты × 4 − (ауты − 8).' },
       potodds: { id: 'potodds', type: 'number', prompt: 'Какой процент нужен по шансам банка?', unit: '%',
         info: { pot: spot.pot, bet: spot.betTo, toCall: spot.toCall },
-        hint: 'Нужный % = твой колл ÷ (банк вместе со ставкой соперника + твой колл) × 100.' },
+        hint: 'Нужный % = твой колл ÷ (банк вместе со ставкой соперника + твой колл) × 100. Можно округлять.' },
+      sizing: { id: 'sizing', type: 'number', prompt: 'Сколько фишек — ставка 2/3 банка?', unit: 'фишек', info: { pot: spot.pot },
+        hint: '2/3 банка: раздели банк на 3 и умножь на 2. Можно округлять.' },
     };
-    return (spot.questions || []).filter((id) => on[id === 'cards' ? 'outs' : id] !== false).map((id) => Q[id]);
+    return (spot.questions || []).filter((id) => on[QKEY[id] || id] !== false).map((id) => Q[id]);
+  }
+  const QKEY = { cards: 'outs', sizing: 'potodds', bluff: 'potodds' }; // settings toggle of each question
+  const sizingAnswer = (sp) => Math.round((sp.pot * 2) / 3);
+  // After the hero bet/raised with a weak hand (air, weak pair, draw): how often must the opponent fold?
+  function afterActionQuestions(spot, action, settings) {
+    const on = (settings && settings.questions) || {};
+    const t = typeof action === 'string' ? action : action && action.type;
+    if (!spot || !spot.fpAt || on.potodds === false || !spot.canRaise || !['bet', 'raise', 'allin'].includes(t)) return [];
+    if (!['none', 'weak'].includes(spot.made.strength)) return [];
+    const to = t === 'allin' ? spot.myBet + spot.stack : action && +action.to > 0 && Number.isFinite(+action.to) ? +action.to
+      : spot.bluff ? spot.bluff.to : spot.myBet + nice((spot.pot * 2) / 3, spot.bb);
+    spot.bluffQ = bluffAt(spot, to);
+    return [{ id: 'bluff', type: 'number', prompt: 'Как часто соперник должен сбросить, чтобы блеф окупился?', unit: '%',
+      info: { pot: spot.pot, bet: spot.bluffQ.bet }, hint: 'Нужно сбросов = ставка ÷ (банк + ставка) × 100. Можно округлять.' }];
   }
 
   // ---------- answer checks ----------
-  const fb = (kind, verdict, title, lines) => ({ kind, verdict, title, lines, ok: verdict !== 'mistake' });
+  // Feedback: title + at most 2 short lines; the rest goes under «Подробнее» (more).
+  const MAXLEN = 100;
+  function pack(all) {
+    const lines = [], more = [];
+    for (const l of all.filter(Boolean)) (lines.length < 2 && l.length <= MAXLEN ? lines : more).push(l);
+    return more.length ? { lines, more } : { lines };
+  }
+  const fb = (kind, verdict, title, all, extra) => ({ kind, verdict, title, ...pack(all), ok: verdict !== 'mistake', ...extra });
+  // Mental math: part ÷ (rest + part) in percent is accepted ±3 pp, anywhere between the exact value and the ones
+  // with rounded numbers (±1), or as the percent of a nearby simple fraction (±2).
+  const FRACS = [[1, 2], [1, 3], [1, 4], [1, 5], [2, 5]];
+  function nearFrac(pct) {
+    let best = null;
+    for (const [a, b] of FRACS) { const v = (100 * a) / b, d = Math.abs(pct - v); if (d <= 2.5 && (!best || d < best.d)) best = { label: `${a}/${b}`, pct: v, d }; }
+    return best;
+  }
+  const sig2 = (x) => (x < 100 ? x : Math.round(x / 10 ** (Math.floor(Math.log10(x)) - 1)) * 10 ** (Math.floor(Math.log10(x)) - 1));
+  const half1 = (x) => (x < 10 ? x : Math.round(x / (10 ** Math.floor(Math.log10(x)) / 2)) * (10 ** Math.floor(Math.log10(x)) / 2));
+  function approxOk(x, part, rest) {
+    if (!Number.isFinite(x)) return false;
+    const exact = (100 * part) / (rest + part);
+    if (Math.abs(x - exact) <= 3) return true;
+    const vals = [exact, ...[sig2, half1].map((r) => (100 * r(part)) / Math.max(1, r(rest) + r(part)))];
+    if (x >= Math.min(...vals) - 1 && x <= Math.max(...vals) + 1) return true;
+    const f = nearFrac(exact);
+    return !!f && Math.abs(x - f.pct) <= 2;
+  }
+  // «160 ÷ 480 ≈ 1/3 → 33%»
+  function quickWay(part, total) {
+    const exact = (100 * part) / total, f = nearFrac(exact), n = Math.round(exact);
+    return `${U.fmt(part)} ÷ ${U.fmt(total)} ≈ ` + (f ? `${f.label} → ${Math.round(f.pct)}%${Math.round(f.pct) !== n ? ` (точно ${n}%)` : ''}` : `${n}%`);
+  }
   // strict: '9,5' and '30%' are numbers, '12abc' and '0x10' are not
   const num = (v) => (typeof v === 'number' ? v : /^\s*-?\d+([.,]\d+)?\s*%?\s*$/.test(String(v)) ? parseFloat(String(v).replace(',', '.')) : NaN);
   const numRu = (x) => (Math.abs(x) >= 1e6 ? 'больше миллиона' : String(+x.toFixed(2)).replace('.', ',')); // '9,5', never '1e+21'
@@ -392,37 +570,52 @@ const Coach = (() => {
     const how = ranks.length > 1 ? `${names} можно посчитать как оверкарты, по 3 аута на каждую` : `${cap(accOf(ranks[0]))} можно посчитать как оверкарту — ещё 3 аута`;
     return `${how}: ${sp.facing ? 'ставка небольшая' : 'соперник не ставил'}, и ${what} может хватить. Тогда ${sp.correctOuts + sp.outs.over} — тоже верно.`;
   }
+  const DRAW_SHORT = { flush: 'флеш-дро', oesd: 'стрит-дро', double: 'двойной гатшот', gutshot: 'гатшот', straight: 'стрит-дро',
+    set: 'до сета', boat: 'до фулл-хауса', trips: 'до тройки', twopair: 'до двух пар' };
+  // Short summary lines first (they become `lines`), the full explanation after them (`more`).
   function outsLines(sp) {
-    const o = sp.outs, lines = o.draws.map((d) => d.text);
-    if (!o.draws.length) lines.push('Ни одна карта не сделает твою руку сильной: дро нет — 0 аутов.');
-    else if (o.draws.length > 1) {
+    const o = sp.outs, first = [], rest = [];
+    if (!o.draws.length) first.push('Ни одна карта не сделает твою руку сильной: дро нет — 0 аутов.');
+    else if (o.draws.length === 1) first.push(o.draws[0].text);
+    else {
       const sum = U.sum(o.draws.map((d) => d.n)), dup = sum - o.total;
+      first.push(cap(`${o.draws.map((d) => `${DRAW_SHORT[d.type]} ${d.n}`).join(' + ')}${dup ? ` − ${dup} повтор` : ''} = ${outsW(o.total)}.`));
+      rest.push(...o.draws.map((d) => d.text));
       const twice = o.list.filter((c) => o.draws.filter((d) => d.cards.includes(c)).length > 1).map(Cards.str);
       const dupTxt = dup ? ` − ${dup} (${twice.join(', ')}: ${dup > 1 ? 'эти карты посчитаны' : 'эта карта посчитана'} дважды)` : '';
-      lines.push(`Всего: ${o.draws.map((d) => d.n).join(' + ')}${dupTxt} = ${outsW(o.total)}.`);
+      rest.push(`Всего: ${o.draws.map((d) => d.n).join(' + ')}${dupTxt} = ${outsW(o.total)}.`);
     }
-    if (o.over) lines.push(overNote(sp));
+    if (sp.multiway && o.dirty) first.push(`3+ игроков — только чистые ауты: ${o.total} − ${o.dirty} = ${o.clean}.`);
+    if (o.over) first.push(overNote(sp));
     if (o.dirty) {
-      lines.push('Грязные ауты: ' + Object.keys(DIRTY_RU).map((k) => {
+      rest.push('Грязные ауты: ' + Object.keys(DIRTY_RU).map((k) => {
         const cs = o.dirtyList.filter((d) => d.code === k).map((d) => Cards.str(d.c));
         return cs.length ? `${cs.join(', ')} — ${DIRTY_RU[k][cs.length > 1 ? 1 : 0]}` : null;
       }).filter(Boolean).join('; ') + '.');
     }
     if (sp.multiway && o.total) {
-      lines.push(o.dirty ? `В банке 3+ игроков — считаем только чистые ауты: против нескольких соперников грязные слишком часто проигрывают. ${o.total} − ${o.dirty} = ${o.clean}.`
+      rest.push(o.dirty ? `В банке 3+ игроков — считаем только чистые ауты: против нескольких соперников грязные слишком часто проигрывают. ${o.total} − ${o.dirty} = ${o.clean}.`
         : 'В банке 3+ игроков — считаем только чистые ауты; здесь все ауты чистые.');
     }
-    return lines;
+    return [...first, ...rest];
   }
   function potLines(sp) {
     const { pot, toCall, potStart, myBet } = sp, f = U.fmt;
     const bets = pot - potStart, n = Math.round(sp.needed);
-    const head = sp.short ? `Банк, который ты можешь выиграть, — ${f(pot)} (лишнее сверх твоего стека тебе не достанется).`
+    const head = sp.pre ? `Банк ${f(pot)} (блайнды и ставки).`
+      : sp.short ? `Банк, который ты можешь выиграть, — ${f(pot)} (лишнее сверх твоего стека тебе не достанется).`
       : bets === sp.betTo && !myBet ? `Банк ${f(potStart)} + ставка ${f(bets)} = ${f(pot)}.`
       : `Банк ${f(potStart)} + ставки на этой улице ${f(bets)} = ${f(pot)}.`;
     const mine = myBet ? ` Ты уже вложил ${f(myBet)} на этой улице — доплатить нужно ${f(toCall)}.` : '';
-    return [`${head}${mine} Твой колл ${f(toCall)}. ${f(toCall)} ÷ (${f(pot)} + ${f(toCall)}) = ${n}%.`];
+    const full = `${head}${mine} Твой колл ${f(toCall)}. ${f(toCall)} ÷ (${f(pot)} + ${f(toCall)}) = ${n}%.`;
+    const quick = `Быстро: ${quickWay(toCall, pot + toCall)}.`;
+    return full.length <= MAXLEN ? [full, quick] : [`Банк ${f(pot)}, твой колл ${f(toCall)}.`, quick, full];
   }
+  const sizingLines = (sp) => [`Банк ${U.fmt(sp.pot)}: ÷ 3 = ${U.fmt(Math.round(sp.pot / 3))}, × 2 = ${U.fmt(sizingAnswer(sp))} фишек.`,
+    'Размеры ставок: 1/2 банка — половина, 2/3 — две трети, банк — весь банк.'];
+  // «Игорь сбросит» — the style is named only when revealed
+  const foldSubj = (sp) => (sp.multiway ? 'все сбросят' : `${sp.villain.name}${sp.villain.revealed ? ` («${sp.villain.styleName}»)` : ''} сбросит`);
+  const bluffNumbers = (sp, b) => `${cap(foldSubj(sp))} ~${pctR(b.fp * 100)}, нужно ${pctR(b.be * 100)}`;
 
   function check(spot, qid, value, answers = {}) {
     const sp = spot, x = num(value), rule = ruleOf(sp);
@@ -462,9 +655,23 @@ const Coach = (() => {
         [`${formula(sp, sp.correctOuts)} ${note}.`, 'Правило 2 и 4: одна карта — ауты × 2, две карты (олл-ин на флопе) — ауты × 4, а при 9+ аутах вычти (ауты − 8).']);
     }
     if (qid === 'potodds') {
-      const n = Math.round(sp.needed); // ±2 around the exact value or the rounded one the player is shown
-      return Math.min(Math.abs(x - sp.needed), Math.abs(x - n)) <= 2 ? fb('potodds', 'correct', `✅ Шансы банка: ${n}% — верно.`, potLines(sp))
-        : fb('potodds', M, `❌ Шансы банка: ${said(xs + '%')}, правильно ${n}%.`, potLines(sp));
+      const n = Math.round(sp.needed);
+      if (!approxOk(x, sp.toCall, sp.pot)) return fb('potodds', M, `❌ Шансы банка: ${said(xs + '%')}, правильно ${n}%.`, potLines(sp));
+      return fb('potodds', 'correct', Math.abs(x - n) <= 2 ? `✅ Шансы банка: ${n}% — верно.` : `✅ Шансы банка: ${xs}% — засчитано (точно ${n}%).`, potLines(sp));
+    }
+    if (qid === 'sizing') {
+      const a = sizingAnswer(sp);
+      return Math.abs(x - a) <= 0.15 * a ? fb('sizing', 'correct', `✅ Ставка 2/3 банка: ${U.fmt(a)} — верно.`, sizingLines(sp))
+        : fb('sizing', M, `❌ Ставка 2/3 банка: ${said(xs)}, правильно ${U.fmt(a)}.`, sizingLines(sp));
+    }
+    if (qid === 'bluff') {
+      const b = sp.bluffQ;
+      if (!b) return null;
+      const n = Math.round(b.be * 100), ok = approxOk(x, b.bet, sp.pot);
+      const lines = [`Быстро: ставка ÷ (банк + ставка) = ${quickWay(b.bet, sp.pot + b.bet)}.`,
+        `${bluffNumbers(sp, b)} — ${b.fp >= b.be ? 'блеф окупается' : sp.kind === 'draw' && sp.ruleEq ? `как чистый блеф не окупается, выручает дро (~${sp.ruleEq}%)` : 'блеф не окупается'}.`];
+      return ok ? fb('bluff', 'correct', `✅ Блеф: нужно ${n}% сбросов — верно.`, lines)
+        : fb('bluff', M, `❌ Блеф: ${said(xs + '%')}, нужно ${n}% сбросов.`, lines);
     }
     return null;
   }
@@ -482,7 +689,8 @@ const Coach = (() => {
     return v.revealed ? `Соперник «${v.styleName}» (${fe[0]})` : `Этот соперник ${fe[1]}`;
   };
   const isDrawSpot = (sp) => sp.kind === 'draw' || (sp.kind === 'nodraw' && sp.street !== 'river');
-  const nounOf = (sp, a) => (a === 'raise' ? (sp.kind === 'draw' ? (sp.facing ? 'рейз-полублеф' : 'ставка-полублеф') : sp.facing ? 'рейз' : 'ставка')
+  const nounOf = (sp, a) => (a === 'raise' ? (sp.kind === 'draw' ? (sp.facing ? 'рейз-полублеф' : 'ставка-полублеф')
+    : sp.kind === 'nodraw' && sp.bluff ? (sp.facing ? 'блеф-рейз' : 'блеф-ставка') : sp.facing ? 'рейз' : 'ставка')
     : { fold: 'сброс', check: 'чек', call: 'колл' }[a]);
   const pastOf = (sp, a) => (a === 'raise' ? (sp.facing ? 'сделал рейз' : 'поставил') : { fold: 'сбросил', check: 'чекнул', call: 'заколлировал' }[a]);
   // '33%' or '33,3%' when rounding would hide which side of the comparison we are on
@@ -490,8 +698,35 @@ const Coach = (() => {
 
   const lowerFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);
   const rangeOf = (sp) => (sp.multiway ? 'соперники так играют' : 'этот соперник так ставит');
-  function actionLines(sp, t) {
+  const FRAC_RU = (f) => (f < 0.58 ? '1/2' : f < 0.83 ? '2/3' : 'весь');
+  function bluffLine(sp, b) {
+    const what = sp.facing ? `Блеф-рейз до ${U.fmt(b.to)}` : `Блеф ${U.fmt(b.bet)}`;
+    return `${what} ${b.margin >= 0.1 ? 'выгоден' : b.margin >= 0 ? 'на грани' : 'не окупится'}: ${foldSubj(sp)} ~${pctR(b.fp * 100)}, нужно ${pctR(b.be * 100)}.`;
+  }
+  const BLUFF_RULE = 'Блеф окупается, когда соперник сбрасывает чаще, чем ставка ÷ (банк + ставка).';
+  // Nobody bet: value bet or check with a made hand, bluff or check with air.
+  function freeLines(sp, t, b) {
+    const L = [], m = sp.made, v = sp.verdicts;
+    if (t === 'fold') L.push('Никогда не сбрасывай, когда можно бесплатно чекнуть.');
+    if (sp.kind === 'made') {
+      const what = cap(m.label);
+      if (v.raise === B) L.push(`${what}${m.strength === 'strong' ? ' — сильная рука' : ' хедз-ап'}: ставь за ценностью — заплатят руки хуже.`);
+      else L.push(`${what}: ${sp.multiway ? 'соперников несколько' : 'на ривере'} на ставку заплатят в основном руки сильнее — чек.`);
+      if (v.check === OK) L.push('Чек тоже допустим: соперник может поставить сам.');
+      else if (v.raise === OK) L.push('Ставка тоже допустима, но заплатят чаще руки лучше.');
+      L.push(`Твоя рука: ${m.ru}.`);
+      return L;
+    }
+    if (b) L.push(bluffLine(sp, b));
+    if (v.raise === B) L.push(`Лучший размер блефа — ${U.fmt(sp.bluff.bet)} (${FRAC_RU(sp.bluff.frac)} банка). Чек тоже допустим.`);
+    else L.push(sp.street === 'river' ? 'Чек: со слабой рукой без ставки ты больше ничего не теряешь.' : 'Чек бесплатный: следующую карту увидишь даром.');
+    L.push(`Твоя рука: ${m.ru}.`, BLUFF_RULE);
+    return L;
+  }
+  function actionLines(sp, t, b) {
     const L = [], o = sp.correctOuts, E = sp.ruleEq, N = sp.needed, v = sp.verdicts;
+    if (!sp.facing && sp.kind !== 'draw') return freeLines(sp, t, b);
+    if (sp.facing && b && t === 'raise') L.push(bluffLine(sp, b));
     if (isDrawSpot(sp)) {
       if (!sp.facing) {
         L.push('Чек бесплатный: следующую карту ты увидишь, ничего не доплачивая.');
@@ -509,6 +744,7 @@ const Coach = (() => {
       }
       if (showdownCall(sp)) {
         L.push(`По аутам ${E}% < ${showNeed(sp)} — как дро колл невыгоден.`);
+        L.push(`Но с готовой рукой (${sp.made.label}) эквити ~${pctR(sp.estEq * 100)} — колл окупается.`);
         L.push(`Но у тебя уже есть готовая рука (${sp.made.ru}): против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${pctR(sp.estEq * 100)} эквити — колл окупается.`);
       } else L.push(`${E}% ${E >= N ? '≥' : '<'} ${showNeed(sp)} — колл ${E >= N ? 'окупается в долгую' : 'в долгую невыгоден'}.`);
       if (overCall(sp)) {
@@ -525,12 +761,19 @@ const Coach = (() => {
         else if (fe === 'low') L.push(`${who(sp)} — рейз-полублеф ${E < N ? 'допустим, но сбросить надёжнее' : 'здесь не лучший вариант'}.`);
         else L.push(`${who(sp)} — полублеф против ${him(sp)} не сработает.`);
         if (sp.multiway) L.push('Соперников несколько — шанс, что сбросят все, ниже.');
-      } else if (t === 'raise' && o < 8) {
+      } else if (t === 'raise' && o < 8 && !b) {
         L.push(`Рейз как полублеф имеет смысл только с сильным дро (8+ аутов) против соперника, который умеет сбрасывать${o ? `, а у тебя ${outsW(o)}` : ''}.`);
       }
+      if (b && t !== 'raise' && v.raise !== M) L.push(bluffLine(sp, b));
       return L;
     }
     const m = sp.made, tag = !/общая/.test(m.ru) && ['сет', 'трипс', 'оверпара', 'топ-пара', 'слабая пара', 'играет борд'].includes(m.label) ? ` (${m.label})` : '';
+    if (sp.bigLate && m.strength !== 'strong') L.push(`Крупный рейз на поздней улице от такого соперника — почти всегда натс: сброс.`);
+    else if (sp.estEq != null && m.strength === 'none') L.push(`Без своей пары колл — ловля блефа (эквити ~${pctR(sp.estEq * 100)}, нужно ${pctR(N)}): сброс надёжнее.`);
+    else if (sp.estEq != null) {
+      const e = sp.estEq * 100, cl = isClose(sp), q = (x) => (cl ? U.pctNum(x, 1) : pctR(x));
+      L.push(`Эквити ~${q(e)} против нужных ${q(N)} — ${cl ? 'на грани' : e >= N ? 'колл окупается' : 'колл невыгоден'}.`);
+    }
     L.push(`Твоя рука: ${m.ru}${tag}.`);
     if (sp.bigLate && m.strength !== 'strong') {
       const end = m.strength === 'none' ? 'Твои карты не дали даже пары — сброс.' : 'С одной парой — сброс.';
@@ -555,7 +798,8 @@ const Coach = (() => {
       const bar = raiseBar(sp), fair = 100 / (sp.nOpp + 1);
       L.push(`Рейз за ценностью нужен, когда ты заметно впереди: ${sp.multiway ? `против ${U.nplural(sp.nOpp, 'соперника', 'соперников', 'соперников')} честная доля — ${pctR(fair)}, ` : ''}` +
         `рейз окупается примерно от ${pctR(bar.ok * 100)}, а у тебя ${pctR(eq)}. На рейз заплатят в основном руки сильнее твоей, а слабые сбросят — колл выгоднее.`);
-    } else if (t === 'raise') L.push('Рейз с рукой, которой не хватает даже на колл, только теряет фишки.');
+    } else if (t === 'raise' && !b) L.push('Рейз с рукой, которой не хватает даже на колл, только теряет фишки.');
+    if (b && t !== 'raise' && v.raise !== M) L.push(bluffLine(sp, b));
     return L;
   }
 
@@ -566,14 +810,24 @@ const Coach = (() => {
     if (t === 'bet' || t === 'allin') t = 'raise';
     if (t === 'call' && !sp.facing) t = 'check';
     if (t === 'check' && sp.facing) t = 'call';
-    const vd = sp.verdicts[t] || M;
+    let vd = sp.verdicts[t] || M, b = sp.bluff;
+    // a bluff is judged at the size actually chosen
+    const raw = action && typeof action === 'object' ? (action.type === 'allin' ? Infinity : +action.to) : NaN;
+    if (t === 'raise' && b && vd !== M && raw > 0) {
+      const to = Math.min(Math.max(raw, sp.facing ? sp.minTo : 0), sp.myBet + sp.stack);
+      if (to !== b.to) { b = bluffAt(sp, to); vd = bluffVd(b.margin); }
+    } else if (t === 'raise' && b && raw > 0) {
+      const to = Math.min(Math.max(raw, sp.facing ? sp.minTo : 0), sp.myBet + sp.stack);
+      if (to !== b.to) b = bluffAt(sp, to);
+    }
     const verdict = vd === B ? 'correct' : vd === OK ? 'acceptable' : 'mistake';
     const alts = Object.keys(sp.verdicts).filter((a) => a !== sp.best && sp.verdicts[a] === B);
-    const right = nounOf(sp, sp.best) + (alts.length ? ` (или ${alts.map((a) => nounOf(sp, a)).join(', ')})` : '');
+    const name = (a) => nounOf(sp, a) + (a === 'raise' && sp.bluff && sp.kind === 'nodraw' ? ` ${sp.facing ? 'до ' : ''}${U.fmt(sp.facing ? sp.bluff.to : sp.bluff.bet)}` : '');
+    const right = name(sp.best) + (alts.length ? ` (или ${alts.map(name).join(', ')})` : '');
     const title = verdict === 'correct' ? `✅ Действие: ${nounOf(sp, t)} — верно.`
-      : verdict === 'acceptable' ? `⚠️ Действие: ${nounOf(sp, t)} — допустимо, но лучше ${right}.`
+      : verdict === 'acceptable' ? `⚠️ Действие: ${nounOf(sp, t)} — допустимо, но лучше ${t === sp.best ? name(t) : right}.`
       : `❌ Действие: ты ${pastOf(sp, t)}, правильно — ${right}.`;
-    return fb('action', verdict, title, actionLines(sp, t));
+    return fb('action', verdict, title, actionLines(sp, t, sp.kind === 'nodraw' ? b : null));
   }
 
   // ---------- after the hand: real equity vs the actual cards ----------
@@ -584,15 +838,15 @@ const Coach = (() => {
     const real = Equity.calc(hands, spot.board, { toCome: spot.cardsToSee }).eq[0] * 100, rule = spot.ruleEq;
     const vs = joinRu(spot.opps.map((o, i) => `${cardsTight(opp[i])} (${o.name})`)), many = opp.length > 1;
     const d = real - rule;
-    let why;
+    let why, detail = null;
     const sc = (h, c = []) => HandEval.score([...h, ...spot.board, ...c]);
     if (Math.abs(d) < 3) why = `Правило 2 и 4 работает: разница всего ${U.dec(Math.abs(d), 1)} п.п.`;
     else if (d > 0 && opp.every((h) => sc(spot.hole) > sc(h))) why = 'Реально больше: ты выигрываешь и без попадания — сейчас твоя рука сильнее.';
     else if (d > 0) { // behind now: uncounted cards (dirty outs, overcards …) win as well
       const counted = new Set(spot.multiway ? spot.outs.cleanList : spot.outs.list), seen = new Set([...spot.hole, ...spot.board, ...opp.flat()]);
       const extra = spot.cardsToSee === 1 ? Cards.deck().filter((c) => !seen.has(c) && !counted.has(c) && opp.every((h) => sc(spot.hole, [c]) > sc(h, [c]))) : [];
-      why = extra.length ? `Реально больше: против этих рук выигрывают и карты, которые не вошли в подсчёт: ${extra.map(Cards.str).join(', ')}.`
-        : 'Реально больше: против этих рук выигрывают и карты, которые не вошли в подсчёт аутов.';
+      why = 'Реально больше: против этих рук выигрывают и карты, которые не вошли в подсчёт.';
+      if (extra.length) detail = `Эти карты: ${extra.map(Cards.str).join(', ')}.`;
     } else {
       const parts = [], rival = many ? 'соперников' : 'соперника', strs = (cs) => cs.map(Cards.str).join(', ');
       if (spot.cardsToSee === 1) {
@@ -613,11 +867,13 @@ const Coach = (() => {
         }
         if (lost.length) parts.push(`${strs(lost)} не ${lost.length > 1 ? 'спасают' : 'спасает'}: с ${lost.length > 1 ? 'ними' : 'ней'} у ${many ? 'кого-то из соперников' : 'соперника'} рука становится сильнее твоей`);
       }
-      why = parts.length ? `Реально меньше: часть аутов не работает (${parts.join('; ')}).`
+      if (parts.length) detail = cap(`${parts.join('; ')}.`);
+      why = parts.length ? 'Реально меньше: часть аутов не работает.'
         : many ? 'Реально меньше: кто-то из соперников уже впереди, и часть твоих аутов не помогает против их рук.'
         : 'Реально меньше: соперник уже впереди, и часть твоих аутов не помогает против его руки.';
     }
-    return { kind: 'realEquity', verdict: 'info', ok: true, title: `ℹ️ ${cap(STREET_RU[spot.street] || 'флоп')}: по правилу ${rule}%. Реально против ${vs}: ${U.pctNum(real, 1)}.`, lines: [why] };
+    return { kind: 'realEquity', verdict: 'info', ok: true, title: `ℹ️ ${cap(STREET_RU[spot.street] || 'флоп')}: по правилу ${rule}%. Реально против ${vs}: ${U.pctNum(real, 1)}.`,
+      ...pack([why, detail]) };
   }
 
   // ---------- reading the opponent (SPEC 9.3) ----------
@@ -647,8 +903,8 @@ const Coach = (() => {
     return { truth: 'bluff', alt: m.strength === 'weak' ? 'medium' : null };
   }
   const ALT_RU = {
-    bluff: 'Слабая пара против крупной ставки — по сути блеф: так ставят, чтобы выбить руки лучше. «Средняя» — близко.',
-    draw: 'Здесь и готовая пара, и дро — главное всё же пара, но «дро» — близко.',
+    bluff: 'Слабая пара против крупной ставки — по сути блеф. «Средняя» — близко.',
+    draw: 'Здесь и пара, и дро — главное пара, но «дро» — близко.',
   };
 
   function holdingRu(hole, board) {
@@ -729,12 +985,11 @@ const Coach = (() => {
       }
       if (seen.length && seen.every((r) => r.random)) lines.push(`Реакции ${gen(p.name)} не совпадали с картами — на теллы этого игрока лучше не опираться.`);
     }
-    lines.push(`На самом деле у ${gen(p.name)}: ${cardsTight(hole)} — ${holdingRu(hole, read.board || hand.board)} (${TRUTH_RU[read.truth]}).`);
-    if (near) lines.push(ALT_RU[read.truth]);
-    if (near) return fb('read', 'acceptable', `⚠️ Чтение соперника: «${lab}» — близко, точнее — ${TRUTH_RU[read.truth]}.`, lines);
-    const title = ok ? `✅ Чтение соперника: верно — ${TRUTH_RU[read.truth]}.`
-      : lab ? `❌ Чтение соперника: ты выбрал «${lab}», а на самом деле — ${TRUTH_RU[read.truth]}.` : `❌ Чтение соперника: на самом деле — ${TRUTH_RU[read.truth]}.`;
-    return fb('read', ok ? 'correct' : M, title, lines);
+    const truth = `На самом деле у ${gen(p.name)}: ${cardsTight(hole)} — ${holdingRu(hole, read.board || hand.board)} (${TRUTH_RU[read.truth]}).`;
+    const top = [truth, near ? ALT_RU[read.truth] : null].filter(Boolean), out = (v, title) => ({ ...fb('read', v, title, top), more: [...(pack(top).more || []), ...lines] });
+    if (near) return out('acceptable', `⚠️ Чтение соперника: «${lab}» — близко, точнее — ${TRUTH_RU[read.truth]}.`);
+    return out(ok ? 'correct' : M, ok ? `✅ Чтение соперника: верно — ${TRUTH_RU[read.truth]}.`
+      : lab ? `❌ Чтение соперника: ты выбрал «${lab}», а на самом деле — ${TRUTH_RU[read.truth]}.` : `❌ Чтение соперника: на самом деле — ${TRUTH_RU[read.truth]}.`);
   }
 
   // ---------- tells: the reaction the player missed while looking at the board ----------
@@ -745,7 +1000,78 @@ const Coach = (() => {
     const st = STREET_RU[street] || 'флоп';
     const meaning = String(r.meaning || '').replace(/флоп/g, st);
     return fb('tells', M, `❌ Теллы: ты смотрел на борд, когда открывался ${st}.`,
-      [`Пока ты смотрел на борд, ты пропустил реакцию: ${table.players[r.seat].name} ${r.text}${meaning ? ` — ${meaning}` : ''}. Смотри на соперников, борд никуда не денется.`]);
+      [`Ты пропустил: ${table.players[r.seat].name} ${r.text}.`, `${meaning ? cap(meaning) + '. ' : ''}Смотри на соперников — борд никуда не денется.`]);
+  }
+
+  // ---------- tells quiz: what does this reaction mean? ----------
+  const HONEST = 'Надёжно у Камня (едва заметно) и Коллинг-станции (явно); у Маньяка — шум.';
+  const ACTED = 'Так играет Актёр (иногда Регуляр): читай наоборот.';
+  const TELLS_GUIDE = [
+    { anim: 'glance', sign: 'Быстрый взгляд на свои фишки', meaning: 'Сила: карта попала, думает о ставке', reliability: HONEST },
+    { anim: 'freeze', sign: 'Замирает, задерживает дыхание', meaning: 'Сила: боится спугнуть', reliability: HONEST },
+    { anim: 'quiet', sign: 'Резко замолкает', meaning: 'Сила: сосредоточился на сильной руке', reliability: HONEST },
+    { anim: 'tremble', sign: 'Руки дрожат при ставке', meaning: 'Очень сильная рука: так волнуются, а не блефуют', reliability: HONEST },
+    { anim: 'lookaway', sign: 'Безразлично смотрит в сторону', meaning: 'Слабость: карта не помогла', reliability: HONEST },
+    { anim: 'chatter', sign: 'Начинает болтать', meaning: 'Слабость: рука не интересна', reliability: HONEST },
+    { anim: 'shrug', sign: 'Пожимает плечами', meaning: 'Слабость: промах', reliability: HONEST },
+    { anim: 'sigh', sign: 'Демонстративно вздыхает: «ну и флоп…»', meaning: 'Актёрство: показная слабость — обычно сила', reliability: ACTED },
+    { anim: 'smile', sign: 'Показно улыбается, уверенно смотрит', meaning: 'Актёрство: показная сила — часто блеф', reliability: ACTED },
+    { anim: 'toss', sign: 'С вызовом бросает фишки', meaning: 'Актёрство: показная уверенность — часто блеф', reliability: ACTED },
+  ];
+  const TELL_OPTIONS = [{ v: 'strength', label: 'Сила (рука попала)' }, { v: 'weakness', label: 'Слабость (не попал)' },
+    { v: 'acting', label: 'Актёрство (показуха — наоборот)' }, { v: 'nothing', label: 'Ничего не значит' }];
+  const TELL_RU = { strength: 'сила', weakness: 'слабость', acting: 'актёрство', nothing: 'ничего не значит' };
+  const STYLE_TELLS = { rock: 'теллы честные, но едва заметные', station: 'теллы честные и явные', reg: 'теллов почти нет, иногда актёрство',
+    maniac: 'реакции хаотичные — не опирайся на них', actor: 'реакции обратные: слабость = сила' };
+  function tellQuestion(reaction, table) {
+    const p = reaction && table && table.players[reaction.seat];
+    if (!p || !reaction.text) return null;
+    return { id: 'tell', type: 'choice', prompt: `Что значит: ${p.name} ${reaction.text}?`, options: TELL_OPTIONS, reaction,
+      hint: 'Сила: взгляд на фишки, замер, молчание. Слабость: взгляд в сторону, болтовня, пожимание плечами. Показуха (вздох, улыбка, бросок фишек) — наоборот.' };
+  }
+  // honest → its face value; acting → «актёрство»; random noise → «ничего» or the face value.
+  function tellReview(reaction, answer, hand, table) {
+    const r = reaction, p = r && table && table.players[r.seat];
+    if (!p) return null;
+    const face = r.shown === 'strength' ? 'strength' : 'weakness', want = r.acting ? 'acting' : r.random ? 'nothing' : face;
+    const ok = answer === want || (r.random && answer === face);
+    const hole = hand && hand.hole && hand.hole[r.seat];
+    const had = r.truth === 'strong' ? 'сильная рука — карта помогла' : r.truth === 'weak' ? 'слабая рука — карта не помогла' : 'карта ничего не изменила';
+    const nature = r.acting ? `Это актёрство: ${r.shown === 'strength' ? 'показная сила прикрывала слабость' : 'показная слабость прикрывала силу'}.`
+      : r.random ? 'Реакция случайная — шум: теллы надёжны не на 100%.' : `Реакция честная: ${face === 'strength' ? 'сила' : 'слабость'} настоящая.`;
+    const guide = TELLS_GUIDE.find((g) => g.anim === r.anim), base = baseOf(p);
+    const style = p.revealed ? `${p.name} («${styleName(p)}»): ${STYLE_TELLS[p.style] || STYLE_TELLS[base] || ''}.`
+      : `Стиль ${gen(p.name)} пока скрыт — проверяй, совпадают ли его реакции с картами.`;
+    const title = ok ? `✅ Телл: верно — ${TELL_RU[answer]}.` : `❌ Телл: ${answer ? `«${TELL_RU[answer] || answer}»` : 'нет ответа'} → на деле ${TELL_RU[want]}.`;
+    return { ...fb('tells', ok ? 'correct' : M, title, [nature, `У ${gen(p.name)}${hole ? ` ${cardsTight(hole)}` : ''}: ${had}.`]),
+      more: [guide ? `${guide.sign} — ${lowerFirst(guide.meaning)}. ${guide.reliability}` : null, style].filter(Boolean) };
+  }
+
+  // ---------- teacher: the best action before the hero acts ----------
+  const BEATS = { 'топ-пара': 'две пары, сеты и топ-пара с кикером старше', 'оверпара': 'сеты и две пары', 'слабая пара': 'любая пара старше', 'ничего': 'любая пара' };
+  const beatsOf = (m) => (m.strength === 'strong' ? 'только более сильные комбинации — это редкость' : BEATS[m.label] || 'любая пара');
+  function advise(spot) {
+    if (!spot) return null;
+    const sp = spot, best = sp.best, act = best === 'raise' ? (sp.facing ? 'raise' : 'bet') : best;
+    let size;
+    if (best === 'raise') {
+      size = sp.bluff && sp.kind === 'nodraw' ? sp.bluff.to
+        : Math.min(sp.myBet + sp.stack, sp.facing ? Math.max(sp.minTo, nice(3 * sp.betTo, sp.bb)) : sp.myBet + nice((sp.pot * 2) / 3, sp.bb));
+    }
+    const ev = evaluateAction(sp, { type: act, to: size });
+    const all = [...ev.lines, ...(ev.more || [])];
+    const risk = size ? size - sp.myBet : act === 'call' ? sp.toCall : 0, share = `${pctR((100 * risk) / Math.max(1, sp.stack + sp.myBet))} стека`;
+    const bluff = sp.kind === 'nodraw' && sp.bluff;
+    const riskLine = act === 'fold' ? 'Сброс: больше ничего не теряешь.' : act === 'check' ? 'Чек бесплатный — ничем не рискуешь.'
+      : act === 'call' ? `Риск: ${U.fmt(risk)} (${share}). Бьют тебя: ${beatsOf(sp.made)}.`
+      : bluff ? `Риск: ${U.fmt(risk)} (${share}) — заплатят в ~${pctR((1 - sp.bluff.fp) * 100)} случаев.`
+      : sp.kind === 'draw' ? `Риск: ${U.fmt(risk)} (${share}); заплатят — у тебя ещё ~${sp.ruleEq}% на дро.`
+      : `Риск: ${U.fmt(risk)} (${share}). Бьют тебя: ${beatsOf(sp.made)}.`;
+    const NOUN = { fold: 'сброс', check: 'чек', call: 'колл', bet: 'ставка', raise: 'рейз' };
+    const alt = Object.keys(sp.verdicts).filter((a) => a !== best && sp.verdicts[a] !== M);
+    const altLine = alt.length ? `${cap(alt.map((a) => nounOf(sp, a)).join(' или '))} тоже нормально.` : null;
+    return { best: act, size, title: `👨‍🏫 Лучше: ${NOUN[act]}${size ? (act === 'raise' ? ' до ' : ' ') + U.fmt(size) : ''}`,
+      lines: [all.find((l) => l.length <= MAXLEN && !/^Никогда не сбрасывай/.test(l)) || all[0], riskLine, altLine].filter(Boolean), more: all.slice(1) };
   }
 
   // ---------- the player's own timing (SPEC 9.4) ----------
@@ -769,5 +1095,6 @@ const Coach = (() => {
     return k === 'strong' || k === 'medium';
   }
 
-  return { analyze, questions, check, evaluateAction, realEquity, readQuestion, readReview, lookHint, timing, heroStrong, computeOuts, madeInfo };
+  return { analyze, questions, afterActionQuestions, check, evaluateAction, advise, foldProb, realEquity, readQuestion, readReview, lookHint,
+    tellQuestion, tellReview, TELLS_GUIDE, timing, heroStrong, computeOuts, madeInfo };
 })();
