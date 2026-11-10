@@ -7,7 +7,7 @@ const UI = (() => {
   let act = null, nextRes = null, keysBound = false, popSeat = null, tipFor = null, tipSticky = false, adv = null;
   const MODE_RU = { learn: 'Обучение', practice: 'Тренировка', tournament: 'Турнир' };
   const STREET_RU = { preflop: 'Префлоп', flop: 'Флоп', turn: 'Тёрн', river: 'Ривер' };
-  const QUICK = ['1/3', '1/2', '2/3', 'Банк', 'Олл-ин'];
+  const QUICK = ['⅓', '½', '⅔', 'Банк', 'Олл-ин'];
   const $ = (sel, el = root) => el.querySelector(sel);
   const $$ = (sel, el = root) => [...el.querySelectorAll(sel)];
   const put = (el, html) => { if (el && el._h !== html) { el._h = html; el.innerHTML = html; } };
@@ -394,13 +394,15 @@ const UI = (() => {
   // [[label, raise-to] × 5]: preflop in big blinds (+1 BB per limper) or multiples of the raise; postflop pot fractions.
   function quickSizes(h, L) {
     const bb = h.bb, potTo = (f) => nice(Engine.sizeTo(h, f), L, bb), tail = [['Банк', potTo(1)], ['Олл-ин', L.maxTo]];
-    if (h.street !== 'preflop') return [['1/3', potTo(1 / 3)], ['1/2', potTo(0.5)], ['2/3', potTo(2 / 3)], ...tail];
+    if (h.street !== 'preflop') return [['⅓', potTo(1 / 3)], ['½', potTo(0.5)], ['⅔', potTo(2 / 3)], ...tail];
     const lim = limpers(h);
-    return [2.5, 3, 4].map((k) => (h.raises ? [`×${U.dec(k)}`, nice(k * L.currentBet, L, bb)] : [`${U.dec(k)} BB`, nice((k + lim) * bb, L, bb)])).concat(tail);
+    if (!h.raises) return [2.5, 3, 4].map((k) => [`${U.dec(k)} BB`, nice((k + lim) * bb, L, bb)]).concat(tail);
+    // 3-bet ×3 in position / ×4 out of it (×2,5 small); 4-bet+ ×2,2–2,5 (×3 big)
+    return (h.raises > 1 ? [2.2, 2.5, 3] : [2.5, 3, 4]).map((k) => [`×${U.dec(k)}`, nice(k * L.currentBet, L, bb)]).concat(tail);
   }
-  // Default raise-to: open 3 BB + 1 BB per limper; ×3 against a raise or a postflop bet; ⅔ pot as a postflop bet.
+  // Default raise-to: open 3 BB + 1 BB per limper; ×3 against a raise or a postflop bet (×2,5 as a 4-bet); ⅔ pot as a postflop bet.
   function defaultRaise(h, L) {
-    if (h.street === 'preflop') return h.raises ? nice(3 * L.currentBet, L, h.bb) : nice((3 + limpers(h)) * h.bb, L, h.bb);
+    if (h.street === 'preflop') return h.raises ? nice((h.raises > 1 ? 2.5 : 3) * L.currentBet, L, h.bb) : nice((3 + limpers(h)) * h.bb, L, h.bb);
     return L.currentBet ? nice(3 * L.currentBet, L, h.bb) : nice(Engine.sizeTo(h, 2 / 3), L, h.bb);
   }
 

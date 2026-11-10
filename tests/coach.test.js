@@ -37,8 +37,10 @@
     assert.strictEqual(spot.outs.dirtyList[0].c, Cards.parse('2h'));
     assert.deepStrictEqual(spot.acceptedOuts, [9]); // big bet: overcards are not counted
     assert.deepStrictEqual([spot.correctOuts, spot.cardsToSee, spot.ruleEq, Math.round(spot.needed), spot.foldEq], [9, 1, 18, 33, 'high']);
-    assert.deepStrictEqual(spot.verdicts, { fold: 'best', raise: 'best', call: 'mistake' });
+    // a rock's pot-size bet is strong: it never folds to a raise, and it pays off little when the flush comes
+    assert.deepStrictEqual(spot.verdicts, { fold: 'best', call: 'mistake', raise: 'mistake' });
     assert.strictEqual(spot.best, 'fold');
+    assert.deepStrictEqual([spot.implied.future, Math.round(spot.implied.neededImplied)], [90, 26]);
     assert.deepStrictEqual(spot.questions, ['outs', 'cards', 'equity', 'potodds']);
 
     const o = ck(spot, 'outs', 12);
@@ -58,11 +60,12 @@
     assert.deepStrictEqual(p.lines, ['Банк 100 + ставка 100 = 200. Твой колл 100. 100 ÷ (200 + 100) = 33%.', 'Быстро: 100 ÷ 300 ≈ 1/3 → 33%.']);
     const a = act(spot, 'call');
     assert.strictEqual(a.kind, 'action');
-    assert.strictEqual(a.title, '❌ Действие: ты заколлировал, правильно — сброс (или рейз-полублеф).');
+    assert.strictEqual(a.title, '❌ Действие: ты заколлировал, правильно — сброс.');
     assert.deepStrictEqual(a.lines, ['18% < 33% — колл в долгую невыгоден.',
-      'Соперник «Камень» (сбрасывает часто), поэтому рейз как полублеф тоже был бы разумным вариантом.']);
+      'Соперник «Камень» (сбрасывает часто), но рейз-полублеф здесь не окупится.']);
+    assert.ok(all(a).includes('Неявные шансы: попадёшь — доплатят ещё ~90 («Камень» платит редко). Даже с ними нужно ~26% — мало.'), all(a).join('\n'));
     assert.strictEqual(act(spot, 'fold').verdict, 'correct');
-    assert.strictEqual(act(spot, 'raise').title, '✅ Действие: рейз-полублеф — верно.');
+    assert.strictEqual(act(spot, 'raise').title, '❌ Действие: ты сделал рейз, правильно — сброс.');
     assert.strictEqual(ck(spot, 'cards', 1).title, '✅ Карты: одна — верно.');
     assert.strictEqual(ck(spot, 'cards', 2).verdict, 'mistake');
   });
@@ -77,7 +80,8 @@
     for (const v of [7, 11, 12, 13, 17]) assert.ok(!ck(spot, 'outs', v).ok, 'outs ' + v);
     assert.strictEqual(ck(spot, 'equity', 30).verdict, 'correct');      // 15 × 2 with the accepted alternative
     const a = act(spot, 'call');
-    assert.ok(all(a).includes('Этот соперник часто сбрасывает на агрессию, поэтому рейз как полублеф тоже был бы разумным вариантом.'));
+    assert.strictEqual(a.verdict, 'correct');                           // 18% < 19%, but the implied odds pay
+    assert.ok(all(a).includes('Этот соперник часто сбрасывает на агрессию — рейз-полублеф допустим.'), all(a).join('\n'));
     assert.ok(!a.lines.join(' ').includes('Камень'));
   });
 
@@ -196,18 +200,22 @@
 
   test('coach: 12+ outs — raise unless the bettor never folds; explaining chips already in', () => {
     // 30% < 33%: calling is unprofitable by the rule (SPEC 7.2), the raise is preferred, folding is the fallback
+    // 30% < 33% by the rule, but the implied odds pay for a call: the raise is preferred, the call is fine too
     const reg = spotOf({ styles: { 1: 'reg' }, holes: { 0: '8h 7h' }, board: '6h 5h Kc' }, HU(100)).spot;
-    assert.deepStrictEqual(reg.verdicts, { raise: 'best', fold: 'ok', call: 'mistake' });
-    assert.strictEqual(act(reg, 'call').title, '❌ Действие: ты заколлировал, правильно — рейз-полублеф.');
-    assert.strictEqual(act(reg, 'call').lines[0], '30% < 33% — колл в долгую невыгоден.');
-    assert.strictEqual(act(reg, 'fold').title, '⚠️ Действие: сброс — допустимо, но лучше рейз-полублеф.');
+    assert.deepStrictEqual(reg.verdicts, { raise: 'best', call: 'ok', fold: 'mistake' });
+    assert.strictEqual(act(reg, 'call').title, '⚠️ Действие: колл — допустимо, но лучше рейз-полублеф.');
+    assert.strictEqual(act(reg, 'call').lines[0], '15 аутов — очень сильное дро (около 53% до ривера): рейз-полублеф лучше колла.'); // why the raise wins
+    assert.ok(all(act(reg, 'call')).includes('Нужно 33%, у тебя 30%; с неявными шансами хватает ~22% — колл окупается.'));
+    assert.strictEqual(act(reg, 'fold').title, '❌ Действие: ты сбросил, правильно — рейз-полублеф.');
+    const shallow = spotOf({ styles: { 1: 'reg' }, holes: { 0: '8h 7h' }, board: '6h 5h Kc', stacks: { 0: 160, 1: 160 } }, HU(100)).spot;
+    assert.deepStrictEqual(shallow.verdicts, { raise: 'best', fold: 'ok', call: 'mistake' }); // nothing left behind to win later
     const regCheap = spotOf({ styles: { 1: 'reg' }, holes: { 0: '8h 7h' }, board: '6h 5h Kc' }, HU(40)).spot; // 30% ≥ 22%
     assert.deepStrictEqual(regCheap.verdicts, { raise: 'best', call: 'ok', fold: 'mistake' });
     assert.strictEqual(act(regCheap, 'fold').title, '❌ Действие: ты сбросил, правильно — рейз-полублеф.');
     const st = spotOf({ styles: { 1: 'station' }, revealed: true, holes: { 0: '8h 7h' }, board: '6h 5h Kc' }, HU(100)).spot;
     assert.strictEqual(st.foldEq, 'none');
-    assert.deepStrictEqual(st.verdicts, { fold: 'best', call: 'mistake', raise: 'mistake' }); // 30% < 33%
-    assert.ok(all(act(st, 'raise')).includes('Соперник «Коллинг-станция» (почти никогда не сбрасывает) — полублеф против него не сработает.'));
+    assert.deepStrictEqual([st.best, st.verdicts.call, st.verdicts.fold], ['call', 'best', 'ok']); // a station pays when it comes
+    assert.ok(act(st, 'call').lines[0].includes('с неявными шансами'));
     const cheap = spotOf({ styles: { 1: 'station' }, holes: { 0: '8h 7h' }, board: '6h 5h Kc' }, HU(40)).spot;
     assert.strictEqual(cheap.best, 'call');                                                   // 30% ≥ 22%
     assert.strictEqual(act(cheap, 'call').lines[0], '30% ≥ 22% — колл окупается в долгую.');
@@ -216,6 +224,77 @@
     assert.deepStrictEqual([re.pot, re.toCall, Math.round(re.needed)], [350, 150, 30]);
     assert.deepStrictEqual(all(ck(re, 'potodds', 30)), ['Банк 350, твой колл 150.', 'Быстро: 150 ÷ 500 ≈ 30%.',
       'Банк 100 + ставки на этой улице 250 = 350. Ты уже вложил 50 на этой улице — доплатить нужно 150. Твой колл 150. 150 ÷ (350 + 150) = 30%.']);
+  });
+
+  // ---------- round 4: implied odds, sizes ----------
+  test('round 4: implied odds — a flush draw calls a 1/2-pot bet from a station, folds vs a rock; a turn gutshot folds', () => {
+    const fd = (style, stacks) => spotOf({ styles: { 1: style }, holes: { 0: 'Ah Th' }, board: '9h 5h 2c', stacks }, HU(50)).spot;
+    const st = fd('station');                                              // pot 150, call 50: 25% needed, 18% by the rule
+    assert.deepStrictEqual([st.ruleEq, Math.round(st.needed), st.implied.future, Math.round(st.implied.neededImplied)], [18, 25, 200, 13]);
+    assert.deepStrictEqual([st.best, st.verdicts.call, st.verdicts.fold], ['call', 'best', 'ok']);
+    const c = act(st, 'call');
+    assert.deepStrictEqual([c.verdict, c.lines[0]], ['correct', 'Нужно 25%, у тебя 18%; с неявными шансами хватает ~13% — колл окупается.']);
+    assert.ok(all(c).some((l) => l.startsWith('Неявные шансы: попадёшь — доплатят ещё ~200 (этот соперник платит почти всегда)')), all(c).join('\n'));
+    assert.strictEqual(act(st, 'fold').verdict, 'acceptable');
+    assert.strictEqual(Coach.advise(st).best, 'call');
+    const rock = fd('rock', { 0: 300, 1: 300 });
+    assert.deepStrictEqual([rock.best, rock.verdicts.call], ['fold', 'ok']);     // 9 outs, 18% vs ~20% with implied odds: close, no blunder
+    const weak = spotOf({ styles: { 1: 'rock' }, holes: { 0: 'Ah Th' }, board: '9h 5h 2c' }, HU(150)).spot; // 1.5× pot: far from the price
+    assert.deepStrictEqual([weak.best, weak.verdicts.call], ['fold', 'mistake']);
+    // one-card flush draw: the flush shows on the board, it pays less
+    const one = spotOf({ styles: { 1: 'station' }, holes: { 0: 'Ah 3c' }, board: 'Kh 8h 4h' }, HU(50)).spot;
+    assert.ok(one.implied.why.includes('флеш соберётся 4 картами борда — его видно'), one.implied.why.join(', '));
+    assert.ok(one.implied.future < st.implied.future);
+    // turn gutshot vs a pot-size bet: one street left, no odds even with the implied ones
+    const turn = spotOf({ styles: { 1: 'station' }, holes: { 0: '9s 8d' }, board: 'Qh Jc 2d 3s' },
+      ['raise:50', 'call', 'next', 'check', 'check', 'next', 'check', 'raise:100']).spot;
+    assert.deepStrictEqual([turn.street, turn.ruleEq, turn.best, turn.verdicts.call], ['turn', 8, 'fold', 'mistake']);
+    assert.ok(turn.implied.why.includes('впереди только ривер'));
+    // the all-in has no implied odds
+    assert.strictEqual(spotOf({ holes: { 0: '8h 7h' }, board: '6h 5h Kc', stacks: { 1: 300 } }, HU(250)).spot.implied, undefined);
+  });
+
+  test('round 4: bet and raise sizes are graded — 2/3 pot ✅, 2× off is only acceptable, raise ~3× the bet', () => {
+    const tp = spotOf({ holes: { 0: 'Ah Tc' }, board: 'Ac 7d 2s' }, ['raise:50', 'call', 'next']).spot;   // pot 100, value bet
+    const bet = (sp, type, to) => Coach.evaluateAction(sp, { type, to });
+    assert.deepStrictEqual([bet(tp, 'bet', 70).verdict, bet(tp, 'bet', 70).lines[1]], ['correct', 'Размер ✅: 70 (2/3 банка).']);
+    assert.strictEqual(bet(tp, 'bet', 50).verdict, 'correct');
+    const big = bet(tp, 'bet', 250);
+    assert.deepStrictEqual([big.verdict, big.title, big.lines[1]], ['acceptable', '⚠️ Действие: ставка — верно, но размер неудачный.', 'Размер: ставка 250 — много, хватит 70 (2/3 банка).']);
+    assert.strictEqual(bet(tp, 'bet', 20).verdict, 'acceptable');
+    const set = spotOf({ holes: { 0: '7h 7d' }, board: '7c 5d 2s' }, HU(60)).spot;                     // a raise with a set
+    assert.deepStrictEqual([bet(set, 'raise', 180).verdict, bet(set, 'raise', 180).lines[1]], ['correct', 'Размер ✅: до 180 (3× ставки).']);
+    assert.strictEqual(bet(set, 'raise', 600).verdict, 'acceptable');
+    assert.strictEqual(bet(set, 'call').lines.some((l) => l.startsWith('Размер')), false);
+    // short stack: all-in is the size
+    const sh = spotOf({ holes: { 0: '7h 7d' }, board: '7c 5d 2s', stacks: { 0: 150, 1: 2000 } }, HU(60)).spot;
+    assert.strictEqual(bet(sh, 'allin').verdict, 'correct');
+  });
+
+  // ---------- round 4 audit ----------
+  test('audit: top pair / overpair on the flop 3-way — bet for value (check is only ok); the text reads right', () => {
+    for (const [h, b] of [['Ad Kc', 'Ks 8d 3c'], ['Qh Qc', 'Jd 7s 3c']]) {
+      const { spot } = spotOf({ n: 3, holes: { 0: h }, board: b }, ['raise:50', 'call', 'call', 'next', 'check']);
+      assert.deepStrictEqual([spot.nOpp, spot.facing], [2, false]);
+      assert.deepStrictEqual([spot.best, spot.verdicts.raise, spot.verdicts.check], ['raise', 'best', 'ok'], h);
+      assert.strictEqual(Coach.advise(spot).best, 'bet');
+    }
+    const river = spotOf({ n: 3, holes: { 0: 'Ad Kc' }, board: 'Ks 8d 3c 2h 5s' },
+      ['raise:50', 'call', 'call', 'next', 'check', 'check', 'check', 'next', 'check', 'check', 'check', 'next', 'check']).spot;
+    assert.strictEqual(river.best, 'check');
+    assert.ok(!act(river, 'check').lines.some((l) => /несколько на ставку/.test(l)), act(river, 'check').lines.join(' / '));
+  });
+
+  test('audit: raises — a set facing a bet raises (teacher too); +1× only per caller of the bet, not per player behind', () => {
+    const set = spotOf({ holes: { 0: '7h 7d' }, board: '7c 5d 2s' }, HU(60)).spot;
+    assert.deepStrictEqual([set.best, Coach.advise(set).best, Coach.advise(set).size], ['raise', 'raise', 180]);
+    // 3-handed: the SB bets 60, the BTN is still to act — 3× is the size, and the teacher's size is graded ✅
+    const mw = spotOf({ n: 3, holes: { 0: '7h 7d' }, board: '7c 5d 2s' }, MW(60)).spot;
+    assert.strictEqual(mw.nOpp, 2);
+    const r = Coach.evaluateAction(mw, { type: 'raise', to: 180 });
+    assert.deepStrictEqual([r.verdict, r.lines[1]], ['correct', 'Размер ✅: до 180 (3× ставки).']);
+    const a = Coach.advise(mw);
+    assert.strictEqual(Coach.evaluateAction(mw, { type: a.best, to: a.size }).verdict, 'correct');
   });
 
   test('coach: no bet — draw asks outs, equity and sizing; check is free, semi-bluff vs folders', () => {
@@ -389,6 +468,9 @@
     assert.ok(c.lines[1].startsWith('Но с готовой рукой (слабая пара) эквити ~'), c.lines[1]);
     assert.ok(all(c)[2].startsWith('Но у тебя уже есть готовая рука (пара дам): против рук, с которыми этот соперник так ставит, у тебя примерно '), all(c)[2]);
     assert.strictEqual(act(qq, 'fold').title, '⚠️ Действие: сброс — допустимо, но лучше колл.');
+    const adv = Coach.advise(qq);                                           // the teacher names the made hand, not the 4% draw
+    assert.ok(adv.lines[0].startsWith('Готовая рука (слабая пара): эквити ~') && adv.lines[0].endsWith('≥ 20% — колл окупается.'), adv.lines[0]);
+    assert.ok(adv.lines[1].includes('Бьют тебя'), adv.lines[1]);
     assert.strictEqual(spotOf({ styles: { 1: 'maniac' }, holes: { 0: 'As 7d' }, board: 'Kh 7c 2d' }, HU(33)).spot.best, 'call');
     const rock = spotOf({ styles: { 1: 'rock' }, holes: { 0: 'Qs Qd' }, board: 'Kh 7c 2d' }, HU(100)).spot;  // a rock’s pot bet: still a fold
     assert.deepStrictEqual([rock.best, rock.verdicts.call], ['fold', 'mistake']);
@@ -758,11 +840,11 @@
     assert.strictEqual(Coach.foldProb(allin.hand, 0, allin.table, 500), 0); // an all-in player cannot fold
   });
 
-  test('round 3: no-bet made hands — value bet with strong/medium heads-up, check medium multiway; sizing question', () => {
+  test('round 3: no-bet made hands — value bet with strong hands, medium vs ≤ 2 opponents (audit: 3-way top pair bets); sizing question', () => {
     const set = spotOf({ holes: { 0: '7c 7d' }, board: 'Kh 7s 2c 9d 3h' }, ['raise:50', 'call', 'next', 'check', 'check', 'next', 'check', 'check', 'next']).spot;
     assert.deepStrictEqual([set.best, set.verdicts, set.questions], ['raise', { raise: 'best', check: 'ok', fold: 'mistake' }, ['sizing']]);
     const mw = spotOf({ n: 3, holes: { 0: 'Kc Jd' }, board: 'Kh 7s 2c' }, [...MW(100).slice(0, 4), 'check']).spot;
-    assert.deepStrictEqual([mw.best, mw.verdicts.raise], ['check', 'ok']);
+    assert.deepStrictEqual([mw.best, mw.verdicts.raise, mw.verdicts.check], ['raise', 'best', 'ok']);
     const q = Coach.questions(set, {}).find((x) => x.id === 'sizing');
     assert.deepStrictEqual([q.prompt, q.unit, q.info.pot], ['Сколько фишек — ставка 2/3 банка?', 'фишек', 100]);
     assert.deepStrictEqual([67, 58, 77, 56, 78].map((v) => ck(set, 'sizing', v).ok), [true, true, true, false, false]);

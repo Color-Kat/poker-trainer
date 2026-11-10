@@ -62,12 +62,15 @@ test('ui: raise sizes are chip-friendly and beginner-standard', () => {
   assert.deepStrictEqual(UI.quickSizes(h, Lg).map((q) => q[0]), ['2,5 BB', '3 BB', '4 BB', 'Банк', 'Олл-ин']);
   assert.deepStrictEqual(UI.quickSizes(h, Lg).slice(0, 3).map((q) => q[1]), [70, 80, 100]);
   Engine.act(h, { type: 'raise', to: 60 });
+  Lg = Engine.legal(h); // BB faces one raise → 3-bet sizes
+  assert.strictEqual(UI.defaultRaise(h, Lg), 180, '×3 against a raise');
+  assert.deepStrictEqual(UI.quickSizes(h, Lg).map((q) => q[0]).slice(0, 3), ['×2,5', '×3', '×4']);
   Engine.act(h, { type: 'raise', to: 180 }); // BB 3-bets
   Engine.act(h, { type: 'fold' });
   Lg = Engine.legal(h);
   assert.strictEqual(h.toAct, 0);
-  assert.strictEqual(UI.defaultRaise(h, Lg), 540, '×3 against a raise');
-  assert.deepStrictEqual(UI.quickSizes(h, Lg).map((q) => q[0]).slice(0, 3), ['×2,5', '×3', '×4']);
+  assert.strictEqual(UI.defaultRaise(h, Lg), 460, '×2,5 as a 4-bet (snapped to 1 BB)');
+  assert.deepStrictEqual(UI.quickSizes(h, Lg).map((q) => q[0]).slice(0, 3), ['×2,2', '×2,5', '×3']);
   for (const [, v] of UI.quickSizes(h, Lg)) assert.ok(v >= Lg.minTo && v <= Lg.maxTo);
   U.seed(null);
 });

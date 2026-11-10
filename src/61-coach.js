@@ -357,6 +357,7 @@ const Coach = (() => {
     const wager = facing ? lastWager(hand, seat) : null;
     const bettor = wager ? wager.seat : facing ? hand.lastRaiser : null;
     const sizeFrac = wager && wager.potBefore > 0 ? wager.add / wager.potBefore : 0;
+    const callers = wager ? hand.log.filter((e) => e.i > wager.i && e.street === street && e.type === 'call').length : 0;
     const myBet = hand.bets[seat] || 0, full = Math.max(0, hand.currentBet - myBet);
     let pot = potOf(hand);
     const short = facing && toCall < full; // hero can only call all-in for less: the excess is not his to win
@@ -373,7 +374,7 @@ const Coach = (() => {
       : oppSeats.reduce((a, s) => (LEVELS.indexOf(foldEqOf(P(s))) < LEVELS.indexOf(foldEqOf(P(a))) ? s : a));
     const vp = P(vSeat), villainFE = foldEqOf(vp), base = baseOf(vp);
     const sp = {
-      street, kind, facing, hole: hole.slice(), board, pot, toCall, betTo: hand.currentBet, bettor: facing ? bettor : null, sizeFrac, allInSpot,
+      street, kind, facing, hole: hole.slice(), board, pot, toCall, betTo: hand.currentBet, bettor: facing ? bettor : null, sizeFrac, allInSpot, callers,
       nOpp, multiway, outs, correctOuts, acceptedOuts: overOk ? [correctOuts, correctOuts + outs.over] : [correctOuts],
       cardsToSee, ruleEq: rule(correctOuts), needed, estEq: null, made, foldEq: multiway ? lower(villainFE) : villainFE,
       seat, myBet, short, canRaise: !!lg.canRaise, overOk, villainFE, stack: lg.stack, bb: hand.bb || 20,
@@ -389,6 +390,7 @@ const Coach = (() => {
     if (facing && (kind === 'made' || river || made.strength === 'weak')) { // a weak pair also has showdown value
       sp.estEq = estimateEq(hole, board, oppSeats.map((s) => ({ base: baseOf(P(s)), frac: s === bettor ? sizeFrac : 0.33 })));
     }
+    if (kind === 'draw' && facing && !allInSpot) sp.implied = impliedOdds(sp, oppSeats.map(P));
     Object.assign(sp, !facing && kind !== 'draw' ? freeVerdicts(sp) : kind === 'draw' || (kind === 'nodraw' && !river) ? drawVerdicts(sp) : madeVerdicts(sp));
     if (kind === 'nodraw' && sp.canRaise) bluffVerdicts(sp, snap, table);
     // a made hand with a real draw on top (top pair + flush draw …) still asks the outs questions (SPEC 7)
@@ -403,18 +405,52 @@ const Coach = (() => {
   const B = 'best', OK = 'ok', M = 'mistake';
   const REAL_DRAWS = ['flush', 'oesd', 'double', 'straight'];
   // Overcards were accepted as outs (small bet, heads-up) and with them the rule pays for the call.
-  const overCall = (sp) => sp.facing && sp.overOk && ruleOf(sp)(sp.correctOuts + sp.outs.over) >= sp.needed && sp.ruleEq < sp.needed;
+  const overCall = (sp) => sp.facing && sp.overOk && ruleOf(sp)(sp.correctOuts + sp.outs.over) >= sp.needed && sp.ruleEq < sp.needed && !implOk(sp);
+  // Implied odds: what a made draw wins later. future = min(chips behind, pot after the call × payoff); the payoff
+  // depends on how the opponents pay off and shrinks for obvious/dirty draws and with one street left.
+  const PAYOFF = { station: 1, maniac: 0.8, reg: 0.5, rock: 0.3 };
+  const PAY_RU = { station: 'платит почти всегда', maniac: 'платит часто', reg: 'платит иногда', rock: 'платит редко' };
+  function impliedOdds(sp, opps) {
+    const pays = opps.map((p) => PAYOFF[baseOf(p)] || 0.5).sort((a, b) => b - a);
+    let pay = pays.length > 1 ? Math.min(1, 0.8 * (pays[0] + 0.25 * U.sum(pays.slice(1)))) : pays[0];
+    const why = [], br = sp.board.map(R), mask = [...sp.hole, ...sp.board].reduce((m, c) => m | (1 << R(c)), 0);
+    if (new Set(br).size < br.length) { pay *= 0.6; why.push('борд спарен'); }
+    const fl = sp.outs.draws.find((d) => d.type === 'flush'), st = sp.outs.draws.find((d) => ['gutshot', 'oesd', 'double', 'straight'].includes(d.type));
+    if (fl && sp.hole.filter((c) => S(c) === S(fl.cards[0])).length === 1) { pay *= 0.5; why.push('флеш соберётся 4 картами борда — его видно'); }
+    else if (fl && sp.outs.dirtyList.some((d) => d.code === 'nonnut')) { pay *= 0.7; why.push('флеш не натсовый'); }
+    else if (!fl && st && st.cards.every((c) => HandEval.straightTop(mask | (1 << R(c))) - 1 > Math.max(...sp.hole.map(R)))) { pay *= 0.6; why.push('стрит с нижнего конца'); }
+    if (sp.street === 'turn') { pay *= 0.75; why.push('впереди только ривер'); }
+    const behind = Math.min(sp.stack - sp.toCall, Math.max(0, ...opps.map((p) => p.stack)));
+    const future = Math.round(Math.max(0, Math.min(behind, (sp.pot + sp.toCall) * pay)));
+    return { future, neededImplied: (100 * sp.toCall) / (sp.pot + sp.toCall + future), pay, why };
+  }
+  // Semi-bluff raise to ~3×, judged by the real fold probability: EV = fp × pot + (1 − fp) × (equity × final pot − raise).
+  // Called, the draw usually sees two cards on the flop (rule of 4), one on the turn.
+  function semiVd(sp) {
+    const o = sp.correctOuts, fe = sp.foldEq;
+    if (o < 4 || !sp.canRaise) return M;
+    if (!sp.fpAt) return o >= 8 && (fe === 'high' || fe === 'medium') ? B : o >= 8 && fe === 'low' ? OK : M;
+    const to = Math.min(Math.max(nice(3 * sp.betTo, sp.bb), sp.minTo), sp.myBet + sp.stack), add = to - sp.myBet, fp = sp.fpAt(to);
+    const eq = (sp.street === 'flop' ? o * 4 - Math.max(0, o - 8) : o * 2) / 100;
+    const ev = fp * sp.pot + (1 - fp) * (eq * (sp.pot + add + (to - sp.betTo)) - add);
+    sp.semi = { to, fp, eq, ev };
+    // ponytail: fp is a 48-combo Monte Carlo — a weak draw (< 8 outs) needs a clear margin, or the verdict flips between runs
+    return o < 8 ? (ev >= 0.1 * sp.pot ? OK : M) : ev >= 0.1 * sp.pot ? B : ev >= 0 ? OK : M;
+  }
   function drawVerdicts(sp) {
     const o = sp.correctOuts, fe = sp.foldEq, folds = fe === 'high' || fe === 'medium';
+    const callOk = sp.facing && sp.ruleEq >= sp.needed, impl = sp.facing && !callOk && !!sp.implied && sp.ruleEq >= sp.implied.neededImplied;
     let best, v;
     // no bet: a semi-bluff needs fold equity — against a calling station only a huge draw may bet
     if (!sp.facing) { best = 'check'; v = { check: B, raise: o >= 8 && folds ? B : fe === 'none' && o < 12 ? M : OK, fold: M }; }
-    // 12+ outs: the raise is preferred; when the rule says the call loses, folding (not calling) is the fallback
-    else if (o >= 12 && fe !== 'none' && sp.canRaise) { best = 'raise'; v = sp.ruleEq >= sp.needed ? { raise: B, call: OK, fold: M } : { raise: B, fold: OK, call: M }; }
-    else if (sp.ruleEq >= sp.needed) { best = 'call'; v = { call: B, raise: o >= 8 && folds ? OK : M, fold: M }; }
-    else if (o >= 8 && folds) { best = 'fold'; v = { fold: B, raise: B, call: M }; }
-    else if (o >= 8 && fe === 'low') { best = 'fold'; v = { fold: B, raise: OK, call: M }; }
-    else { best = 'fold'; v = { fold: B, call: M, raise: M }; }
+    // 12+ outs: the raise is preferred; when the call loses even with implied odds, folding is the fallback
+    else if (o >= 12 && fe !== 'none' && sp.canRaise) { best = 'raise'; v = callOk || impl ? { raise: B, call: OK, fold: M } : { raise: B, fold: OK, call: M }; }
+    else if (callOk) { best = 'call'; v = { call: B, raise: o >= 8 && folds ? OK : M, fold: M }; }
+    else if (impl) { best = 'call'; v = { call: B, fold: OK, raise: semiVd(sp) === M ? M : OK }; } // implied odds pay for the call
+    else { // a draw just short of the implied price (within the same 5 pp as isClose): the call is no blunder
+      const near = !!sp.implied && o >= 8 && sp.ruleEq >= sp.implied.neededImplied - Math.min(5, sp.needed / 4);
+      best = 'fold'; v = { fold: B, call: near ? OK : M, raise: semiVd(sp) };
+    }
     if (showdownCall(sp) && v.call === M) { // a weak pair that is often ahead of this bettor: calling is right too
       v = { ...v, call: B, fold: v.fold === M ? M : OK };
       if (best === 'fold') best = 'call';
@@ -442,7 +478,7 @@ const Coach = (() => {
       const raise = eq >= bar.best ? B : eq >= bar.ok || m.strength === 'strong' ? OK : M;
       // a weak pair vs a hidden style: the player cannot know the bettor bluffs a lot, so folding is no blunder
       const fold = close || (m.strength === 'weak' && !sp.villain.revealed) ? OK : M;
-      res = { best: 'call', verdicts: { call: B, raise, fold } };
+      res = { best: raise === B && m.strength === 'strong' && sp.canRaise ? 'raise' : 'call', verdicts: { call: B, raise, fold } };
     }
     if (!sp.canRaise) delete res.verdicts.raise;
     return res;
@@ -451,7 +487,7 @@ const Coach = (() => {
   // Nobody bet and the hero has a made hand or air (draws: drawVerdicts). Never fold when the check is free.
   function freeVerdicts(sp) {
     const m = sp.made.strength;
-    let res = m === 'strong' || (m === 'medium' && !sp.multiway && sp.street !== 'river')
+    let res = m === 'strong' || (m === 'medium' && sp.nOpp <= 2 && sp.street !== 'river')
       ? { best: 'raise', verdicts: { raise: B, check: OK, fold: M } }    // value: worse hands pay
       : { best: 'check', verdicts: { check: B, raise: m === 'medium' ? OK : M, fold: M } }; // air: bluffVerdicts decides
     if (!sp.canRaise) res = { best: 'check', verdicts: { check: B, fold: M } };
@@ -710,8 +746,8 @@ const Coach = (() => {
     if (t === 'fold') L.push('Никогда не сбрасывай, когда можно бесплатно чекнуть.');
     if (sp.kind === 'made') {
       const what = cap(m.label);
-      if (v.raise === B) L.push(`${what}${m.strength === 'strong' ? ' — сильная рука' : ' хедз-ап'}: ставь за ценностью — заплатят руки хуже.`);
-      else L.push(`${what}: ${sp.multiway ? 'соперников несколько' : 'на ривере'} на ставку заплатят в основном руки сильнее — чек.`);
+      if (v.raise === B) L.push(`${what}${m.strength === 'strong' ? ' — сильная рука' : sp.multiway ? ' против двоих' : ' хедз-ап'}: ставь за ценностью — заплатят руки хуже.`);
+      else L.push(`${what}: ${sp.street === 'river' ? 'это ривер' : 'соперников много'} — на ставку заплатят в основном руки сильнее, чек.`);
       if (v.check === OK) L.push('Чек тоже допустим: соперник может поставить сам.');
       else if (v.raise === OK) L.push('Ставка тоже допустима, но заплатят чаще руки лучше.');
       L.push(`Твоя рука: ${m.ru}.`);
@@ -722,6 +758,13 @@ const Coach = (() => {
     else L.push(sp.street === 'river' ? 'Чек: со слабой рукой без ставки ты больше ничего не теряешь.' : 'Чек бесплатный: следующую карту увидишь даром.');
     L.push(`Твоя рука: ${m.ru}.`, BLUFF_RULE);
     return L;
+  }
+  const implOk = (sp) => !!sp.implied && sp.ruleEq < sp.needed && sp.ruleEq >= sp.implied.neededImplied;
+  function impliedLine(sp) {
+    const I = sp.implied, v = sp.villain, n = Math.round(I.neededImplied);
+    const payer = sp.multiway ? 'соперники платят' : v.revealed ? `«${v.styleName}» ${PAY_RU[v.base]}` : `этот соперник ${PAY_RU[v.base]}`;
+    return `Неявные шансы: попадёшь — доплатят ещё ~${U.fmt(I.future)} (${payer}${I.why.length ? '; меньше: ' + I.why.join(', ') : ''}). ` +
+      (implOk(sp) ? `С ними хватает ~${n}%.` : `Даже с ними нужно ~${n}% — мало.`);
   }
   function actionLines(sp, t, b) {
     const L = [], o = sp.correctOuts, E = sp.ruleEq, N = sp.needed, v = sp.verdicts;
@@ -746,7 +789,8 @@ const Coach = (() => {
         L.push(`По аутам ${E}% < ${showNeed(sp)} — как дро колл невыгоден.`);
         L.push(`Но с готовой рукой (${sp.made.label}) эквити ~${pctR(sp.estEq * 100)} — колл окупается.`);
         L.push(`Но у тебя уже есть готовая рука (${sp.made.ru}): против рук, с которыми ${rangeOf(sp)}, у тебя примерно ${pctR(sp.estEq * 100)} эквити — колл окупается.`);
-      } else L.push(`${E}% ${E >= N ? '≥' : '<'} ${showNeed(sp)} — колл ${E >= N ? 'окупается в долгую' : 'в долгую невыгоден'}.`);
+      } else if (implOk(sp)) L.push(`Нужно ${showNeed(sp)}, у тебя ${E}%; с неявными шансами хватает ~${pctR(sp.implied.neededImplied)} — колл окупается.`);
+      else L.push(`${E}% ${E >= N ? '≥' : '<'} ${showNeed(sp)} — колл ${E >= N ? 'окупается в долгую' : 'в долгую невыгоден'}.`);
       if (overCall(sp)) {
         const all = o + sp.outs.over;
         L.push(`С оверкартами (${outsW(all)}) — ${ruleOf(sp)(all)}% ≥ ${showNeed(sp)}: колл тоже допустим, но пара из оверкарты может и не выиграть, а без них у тебя только ${E}%.`);
@@ -754,17 +798,20 @@ const Coach = (() => {
       if (!o && sp.kind === 'nodraw') L.push('У тебя нет ни готовой руки, ни дро — платить не за что.');
       if (o >= 12 && v.raise === B) {
         const eqTo = sp.street === 'flop' ? `около ${o * 4 - (o - 8)}% до ривера` : `около ${o * 2}% на ривере`;
-        L.push(`${outsW(o)} — очень сильное дро (${eqTo}): рейз-полублеф выигрывает сразу, если соперник сбросит, а если заплатит — у тебя всё равно много шансов.`);
-      } else if (o >= 8 && sp.canRaise) {
-        const fe = sp.foldEq;
-        if (fe === 'high' || fe === 'medium') L.push(`${who(sp)}, поэтому рейз как полублеф ${E < N ? 'тоже был бы разумным вариантом' : 'тоже допустим'}.`);
-        else if (fe === 'low') L.push(`${who(sp)} — рейз-полублеф ${E < N ? 'допустим, но сбросить надёжнее' : 'здесь не лучший вариант'}.`);
-        else L.push(`${who(sp)} — полублеф против ${him(sp)} не сработает.`);
+        L.unshift(`${outsW(o)} — очень сильное дро (${eqTo}): рейз-полублеф лучше колла.`); // the verdict's reason goes first
+        L.push('Рейз выигрывает сразу, если соперник сбросит, а если заплатит — у тебя всё равно много шансов.');
+      } else if (o >= 4 && sp.canRaise && (o >= 8 || v.raise !== M)) {
+        const folds = sp.foldEq === 'high' || sp.foldEq === 'medium';
+        if (v.raise === B) L.push(`${who(sp)}, поэтому рейз как полублеф тоже был бы разумным вариантом.`);
+        else if (v.raise === OK) L.push(`${who(sp)} — рейз-полублеф допустим${sp.best === 'fold' ? ', но сбросить надёжнее' : ''}.`);
+        else L.push(folds ? `${who(sp)}, но рейз-полублеф здесь не окупится.` : `${who(sp)} — полублеф против ${him(sp)} не сработает.`);
+        if (sp.semi) L.push(`Рейз до ${U.fmt(sp.semi.to)}: ${foldSubj(sp)} ~${pctR(sp.semi.fp * 100)}, а если заплатят — у тебя ~${pctR(sp.semi.eq * 100)} на дро.`);
         if (sp.multiway) L.push('Соперников несколько — шанс, что сбросят все, ниже.');
       } else if (t === 'raise' && o < 8 && !b) {
         L.push(`Рейз как полублеф имеет смысл только с сильным дро (8+ аутов) против соперника, который умеет сбрасывать${o ? `, а у тебя ${outsW(o)}` : ''}.`);
       }
       if (b && t !== 'raise' && v.raise !== M) L.push(bluffLine(sp, b));
+      if (sp.implied && o > 0 && E < N) L.push(impliedLine(sp));
       return L;
     }
     const m = sp.made, tag = !/общая/.test(m.ru) && ['сет', 'трипс', 'оверпара', 'топ-пара', 'слабая пара', 'играет борд'].includes(m.label) ? ` (${m.label})` : '';
@@ -772,7 +819,8 @@ const Coach = (() => {
     else if (sp.estEq != null && m.strength === 'none') L.push(`Без своей пары колл — ловля блефа (эквити ~${pctR(sp.estEq * 100)}, нужно ${pctR(N)}): сброс надёжнее.`);
     else if (sp.estEq != null) {
       const e = sp.estEq * 100, cl = isClose(sp), q = (x) => (cl ? U.pctNum(x, 1) : pctR(x));
-      L.push(`Эквити ~${q(e)} против нужных ${q(N)} — ${cl ? 'на грани' : e >= N ? 'колл окупается' : 'колл невыгоден'}.`);
+      L.push(sp.best === 'raise' ? `Эквити ~${q(e)} при нужных ${q(N)} — ты далеко впереди: рейз за ценностью.`
+        : `Эквити ~${q(e)} против нужных ${q(N)} — ${cl ? 'на грани' : e >= N ? 'колл окупается' : 'колл невыгоден'}.`);
     }
     L.push(`Твоя рука: ${m.ru}${tag}.`);
     if (sp.bigLate && m.strength !== 'strong') {
@@ -793,7 +841,8 @@ const Coach = (() => {
       if (ok && !close && v.fold === OK) L.push('Сброс тоже допустим: со слабой парой против крупной ставки соперника, о котором ты мало знаешь, легко оказаться позади.');
     }
     if (sp.drawToo) L.push(`По правилу 2 и 4 одни улучшения (${outsW(o)}) дают ${E}%, но ты и так часто впереди: оценка вместе с готовой рукой — ${pctR(eq)}. Решение принимаем по ней.`);
-    if (v.raise === B || v.raise === OK) L.push('Рука сильная — повысить за ценностью тоже хорошо.');
+    if (sp.best === 'raise') L.push('Колл тоже хорош, но рейз заберёт больше: заплатят руки хуже твоей.');
+    else if (v.raise === B || v.raise === OK) L.push('Рука сильная — повысить за ценностью тоже хорошо.');
     else if (t === 'raise' && ok) {
       const bar = raiseBar(sp), fair = 100 / (sp.nOpp + 1);
       L.push(`Рейз за ценностью нужен, когда ты заметно впереди: ${sp.multiway ? `против ${U.nplural(sp.nOpp, 'соперника', 'соперников', 'соперников')} честная доля — ${pctR(fair)}, ` : ''}` +
@@ -801,6 +850,43 @@ const Coach = (() => {
     } else if (t === 'raise' && !b) L.push('Рейз с рукой, которой не хватает даже на колл, только теряет фишки.');
     if (b && t !== 'raise' && v.raise !== M) L.push(bluffLine(sp, b));
     return L;
+  }
+
+  // ---------- bet / raise size ----------
+  // Value 1/2–3/4 pot (bigger vs a sticky opponent or with a strong hand, thin value smaller, multiway ≥ 1/2),
+  // semi-bluff bets 0.4–0.8, raises ~3× the bet (+1× per extra opponent); all-in is fine when the stack is ≤ the pot.
+  // Bluffs: the size is already graded by the fold probability — the line only points to the cheapest good size.
+  function raisePlan(sp) {
+    const maxTo = sp.myBet + sp.stack, fr = fracRu(sp);
+    let lo, hi, ideal, what;
+    if (sp.facing) {
+      const k = sp.callers || 0;
+      [lo, hi, ideal] = [(2.3 + k) * sp.betTo, (4 + k) * sp.betTo, nice((3 + k) * sp.betTo, sp.bb)];
+      what = (x) => (x >= maxTo ? 'олл-ин' : `${U.dec(x / sp.betTo, 1)}× ставки`);
+    } else {
+      const st = sp.made.strength, sticky = ['station', 'maniac'].includes(sp.villain.base);
+      let [l, h] = sp.kind === 'draw' ? [0.4, 0.8] : st === 'strong' ? [0.5, sticky ? 1.5 : 1.2] : [0.33, sticky ? 1 : 0.8];
+      if (sp.multiway) l = Math.max(l, 0.5);
+      [lo, hi, ideal] = [sp.myBet + l * sp.pot, sp.myBet + h * sp.pot, sp.myBet + nice((2 * sp.pot) / 3, sp.bb)];
+      what = (x) => (x >= maxTo ? 'олл-ин' : fr(x - sp.myBet));
+    }
+    if (sp.stack <= sp.pot || ideal >= maxTo) hi = ideal = maxTo; // tiny SPR: all-in is the size
+    lo = Math.min(Math.max(lo, sp.facing ? sp.minTo : 0), maxTo);
+    return { lo, hi, ideal: Math.max(ideal, Math.min(sp.facing ? sp.minTo : 0, maxTo)), maxTo, what };
+  }
+  const fracRu = (sp) => (x) => { const f = x / sp.pot; return f > 1.2 ? `${U.dec(f, 1)} банка` : f >= 0.83 ? 'весь банк' : `${f < 0.29 ? '1/4' : f < 0.42 ? '1/3' : f < 0.58 ? '1/2' : f < 0.71 ? '2/3' : '3/4'} банка`; };
+  function sizeNote(sp, raw, b) {
+    const maxTo = sp.myBet + sp.stack, to = Math.min(Math.max(raw, sp.facing ? sp.minTo : 1), maxTo), add = to - sp.myBet;
+    const fr = fracRu(sp);
+    if (sp.kind === 'nodraw' && sp.bluff && b) {
+      return b.margin >= sp.bluff.margin - 0.05 || b.to === sp.bluff.to ? { far: false, line: `Размер ✅: ${U.fmt(add)} (${fr(add)}).` }
+        : { far: false, line: `Размер: ${U.fmt(add)} — лучше ${U.fmt(sp.bluff.bet)} (${fr(sp.bluff.bet)}): выгоднее при тех же сбросах.` };
+    }
+    const { lo, hi, ideal, what } = raisePlan(sp);
+    if (to >= lo - 0.5 && to <= hi + 0.5) return { far: false, line: `Размер ✅: ${sp.facing ? 'до ' + U.fmt(to) : U.fmt(add)} (${what(to)}).` };
+    const big = to > hi, ia = ideal - sp.myBet;
+    return { far: add > 2 * ia || add < ia / 2,
+      line: `Размер: ${sp.facing ? 'рейз до ' + U.fmt(to) : 'ставка ' + U.fmt(add)} — ${big ? 'много, хватит' : 'мало, лучше'} ${sp.facing ? U.fmt(ideal) : U.fmt(ia)} (${what(ideal)}).` };
   }
 
   function evaluateAction(spot, action) {
@@ -820,14 +906,17 @@ const Coach = (() => {
       const to = Math.min(Math.max(raw, sp.facing ? sp.minTo : 0), sp.myBet + sp.stack);
       if (to !== b.to) b = bluffAt(sp, to);
     }
-    const verdict = vd === B ? 'correct' : vd === OK ? 'acceptable' : 'mistake';
+    const size = t === 'raise' && vd !== M && raw > 0 ? sizeNote(sp, raw, b) : null;
+    const verdict = vd === B && !(size && size.far) ? 'correct' : vd !== M ? 'acceptable' : 'mistake';
     const alts = Object.keys(sp.verdicts).filter((a) => a !== sp.best && sp.verdicts[a] === B);
     const name = (a) => nounOf(sp, a) + (a === 'raise' && sp.bluff && sp.kind === 'nodraw' ? ` ${sp.facing ? 'до ' : ''}${U.fmt(sp.facing ? sp.bluff.to : sp.bluff.bet)}` : '');
     const right = name(sp.best) + (alts.length ? ` (или ${alts.map(name).join(', ')})` : '');
     const title = verdict === 'correct' ? `✅ Действие: ${nounOf(sp, t)} — верно.`
-      : verdict === 'acceptable' ? `⚠️ Действие: ${nounOf(sp, t)} — допустимо, но лучше ${t === sp.best ? name(t) : right}.`
+      : verdict === 'acceptable' ? (vd === B ? `⚠️ Действие: ${nounOf(sp, t)} — верно, но размер неудачный.` : `⚠️ Действие: ${nounOf(sp, t)} — допустимо, но лучше ${t === sp.best ? name(t) : right}.`)
       : `❌ Действие: ты ${pastOf(sp, t)}, правильно — ${right}.`;
-    return fb('action', verdict, title, actionLines(sp, t, sp.kind === 'nodraw' ? b : null));
+    const lines = actionLines(sp, t, sp.kind === 'nodraw' ? b : null);
+    if (size) lines.splice(1, 0, size.line);
+    return fb('action', verdict, title, lines);
   }
 
   // ---------- after the hand: real equity vs the actual cards ----------
@@ -1056,13 +1145,15 @@ const Coach = (() => {
     let size;
     if (best === 'raise') {
       size = sp.bluff && sp.kind === 'nodraw' ? sp.bluff.to
-        : Math.min(sp.myBet + sp.stack, sp.facing ? Math.max(sp.minTo, nice(3 * sp.betTo, sp.bb)) : sp.myBet + nice((sp.pot * 2) / 3, sp.bb));
+        : raisePlan(sp).ideal;
     }
     const ev = evaluateAction(sp, { type: act, to: size });
     const all = [...ev.lines, ...(ev.more || [])];
     const risk = size ? size - sp.myBet : act === 'call' ? sp.toCall : 0, share = `${pctR((100 * risk) / Math.max(1, sp.stack + sp.myBet))} стека`;
     const bluff = sp.kind === 'nodraw' && sp.bluff;
+    const sd = act === 'call' && isDrawSpot(sp) && showdownCall(sp); // the call is for the made hand, not the draw
     const riskLine = act === 'fold' ? 'Сброс: больше ничего не теряешь.' : act === 'check' ? 'Чек бесплатный — ничем не рискуешь.'
+      : act === 'call' && sp.kind === 'draw' && !sd ? `Риск: ${U.fmt(risk)} (${share}); попадёшь в ~${sp.ruleEq}%${sp.implied ? `, тогда доплатят ~${U.fmt(sp.implied.future)}` : ''}.`
       : act === 'call' ? `Риск: ${U.fmt(risk)} (${share}). Бьют тебя: ${beatsOf(sp.made)}.`
       : bluff ? `Риск: ${U.fmt(risk)} (${share}) — заплатят в ~${pctR((1 - sp.bluff.fp) * 100)} случаев.`
       : sp.kind === 'draw' ? `Риск: ${U.fmt(risk)} (${share}); заплатят — у тебя ещё ~${sp.ruleEq}% на дро.`
@@ -1071,7 +1162,7 @@ const Coach = (() => {
     const alt = Object.keys(sp.verdicts).filter((a) => a !== best && sp.verdicts[a] !== M);
     const altLine = alt.length ? `${cap(alt.map((a) => nounOf(sp, a)).join(' или '))} тоже нормально.` : null;
     return { best: act, size, title: `👨‍🏫 Лучше: ${NOUN[act]}${size ? (act === 'raise' ? ' до ' : ' ') + U.fmt(size) : ''}`,
-      lines: [all.find((l) => l.length <= MAXLEN && !/^Никогда не сбрасывай/.test(l)) || all[0], riskLine, altLine].filter(Boolean), more: all.slice(1) };
+      lines: [sd ? `Готовая рука (${sp.made.label}): эквити ~${pctR(sp.estEq * 100)} ≥ ${showNeed(sp)} — колл окупается.` : all.find((l) => l.length <= MAXLEN && !/^Никогда не сбрасывай/.test(l)) || all[0], riskLine, altLine].filter(Boolean), more: all.slice(1) };
   }
 
   // ---------- the player's own timing (SPEC 9.4) ----------

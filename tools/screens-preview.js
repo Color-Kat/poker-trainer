@@ -53,7 +53,7 @@ const SCENES = [
   ['stats-empty', () => { Stats.reset(); Screens.stats({ onBack() {} }); }],
   ['stats', () => Screens.stats({ onBack() {} })],
   ['stats-modal', () => Screens.statsModal(), true],
-  ...['outs', 'rule', 'odds', 'pos', 'types'].map((t) => ['cheat-' + t, `() => Screens.cheatSheet('${t}')`, true]),
+  ...['outs', 'rule', 'odds', 'play', 'pos', 'types'].map((t) => ['cheat-' + t, `() => Screens.cheatSheet('${t}')`, true]),
   ['range-utg', () => Screens.rangeModal('UTG', 'Диапазон открытия: UTG'), true],
   ['range-vsraise', () => Screens.rangeModal('vsRaise', 'Против рейза'), true],
   ['mistake', (ms) => Screens.mistake(ms[1]), true],
